@@ -67,7 +67,7 @@ WasaEmployees/{docId}
 
 ### Important caveats
 
-- `uid` is empty (`""`) for employees the dashboard created **before** the employee has logged in. The dashboard does NOT create a Firebase Auth user during employee creation (a deliberate choice to avoid signing the admin out). The employee app must therefore handle two cases on first login (see §4).
+- `uid` **is always populated**. When the admin creates an employee, the dashboard provisions a Firebase Auth user via a secondary Firebase app (so the admin session is not disturbed) and stores the resulting Auth UID directly on the `WasaEmployees` document. The employee app can rely on `WasaEmployees.uid === auth.currentUser.uid` after sign-in.
 - `currentAssignments` and `totalResolved` are denormalised counts. Right now no one maintains them. The employee app SHOULD NOT modify them. If you want a real count, derive it client-side from `Complaints` queries.
 - `password` on the doc is a SHA-256 hash placeholder kept by the dashboard and is **not** a real authentication credential. Treat it as opaque. Real authentication goes through Firebase Auth (Email/Password).
 
@@ -99,25 +99,20 @@ const emp = { id: empDoc.id, ...empDoc.data() };
 if (emp.active === false) throw new Error('Your account is inactive.');
 ```
 
-### First-login bootstrap (one-time)
+### Login is straightforward
 
-If `emp.uid === ''` or `emp.uid === undefined`, that means the dashboard created the doc but no Auth user existed yet. There are **two scenarios**:
+The dashboard pre-provisions a Firebase Auth user when it creates the employee, so `uid` is never empty by the time an employee tries to sign in. The employee app should:
 
-1. **The Auth user already exists** (because somebody — admin, you, or a script — pre-provisioned it). `signInWithEmailAndPassword` will succeed, and you simply patch `uid` on the doc:
-   ```ts
-   await updateDoc(doc(db, 'WasaEmployees', emp.id), {
-     uid: cred.user.uid,
-     lastLogin: serverTimestamp(),
-     updatedAt: serverTimestamp(),
-   });
-   ```
-2. **The Auth user does NOT yet exist.** Sign-in fails with `auth/user-not-found`. In that case fall back to:
-   ```ts
-   const cred = await createUserWithEmailAndPassword(auth, email, password);
-   ```
-   then run the same `updateDoc` patch to write `uid: cred.user.uid` on the doc.
+```ts
+const cred = await signInWithEmailAndPassword(auth, email, password);
+// cred.user.uid === emp.uid (assert this and bail if mismatched).
+await updateDoc(doc(db, 'WasaEmployees', emp.id), {
+  lastLogin: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
+```
 
-Subsequent logins are simple: `signInWithEmailAndPassword` + `updateDoc({ lastLogin: serverTimestamp() })`.
+If `emp.uid` ever happens to be missing or different from `auth.currentUser.uid` (legacy data), the safest recovery is to log a warning and refuse to proceed — don't try to repair it from the client.
 
 ### Realtime "you've been deactivated" listener (recommended)
 

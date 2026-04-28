@@ -8,7 +8,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { createAuthUserForEmployee, db } from "@/lib/firebase";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown, MultiSelect } from "@/components/ui/Dropdown";
@@ -321,12 +321,15 @@ export function EmployeeFormModal({
           title: "Employee updated",
         });
       } else {
-        // Placeholder password storage — see sha256 note above.
+        // Provision a Firebase Auth user via a secondary app so the admin's
+        // primary session is not disturbed, then persist its uid alongside the profile.
+        const email = form.email.trim().toLowerCase();
+        const uid = await createAuthUserForEmployee(email, form.password);
         const hashed = await sha256(form.password);
         await addDoc(collection(db, "WasaEmployees"), {
-          uid: "",
+          uid,
           name: form.name.trim(),
-          email: form.email.trim().toLowerCase(),
+          email,
           phone: form.phone.trim(),
           password: hashed,
           cnic: form.cnic.trim(),
