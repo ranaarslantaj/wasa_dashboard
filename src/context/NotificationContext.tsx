@@ -242,6 +242,8 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({
     const cutoff = Timestamp.fromDate(new Date(Date.now() - LOOKBACK_MS));
     const q = query(
       collection(db, "Complaints"),
+      where("complainType", "==", "manhole"),
+      where("departmentType", "==", "wasa"),
       where("createdAt", ">=", cutoff),
       orderBy("createdAt", "desc"),
       limit(MAX_NOTIFICATIONS)

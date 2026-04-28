@@ -1,70 +1,72 @@
 import type { Timestamp } from 'firebase/firestore';
+import type { WasaCategoryValue } from '@/constants/wasaCategories';
 
-export type ComplaintStatus =
-  | 'pending'
-  | 'assigned'
-  | 'in_progress'
-  | 'resolved'
-  | 'rejected'
-  | 'reopened';
-
-export type ComplaintApproval = 'pending' | 'approved' | 'rejected';
-
-export type ComplaintPriority = 'low' | 'medium' | 'high' | 'critical';
-
-export type ComplaintSource = 'public_app' | 'dashboard';
+export type ComplainTypeValue = 'dog' | 'manhole';
+export type DepartmentType = 'wasa' | null;
+export type RoutingStrategy = 'UC_MC_AUTO' | 'DEPT_DASHBOARD';
+export type ComplaintStatus = 'action_required' | 'action_taken' | 'irrelevant';
+export type UcMcType = 'UC' | 'MC' | '';
+export type ComplaintPriority = 'low' | 'medium' | 'high' | 'critical'; // derived only
 
 export interface Coordinates {
   lat: number;
   lng: number;
 }
 
-export interface Complaint {
-  id: string;
-  complaintId: string;
+export interface ActionCoordinates {
+  lat: number | null;
+  lng: number | null;
+}
 
-  // Complainant (public user)
+export interface Complaint {
+  // Identity
+  id: string;                       // doc id
+  complaintId: string;              // human-readable e.g. VHR-00001
+
+  // Complainant
   complainantName: string;
   complainantPhone: string;
-  complainantCNIC: string;
+  complainantCnic: string;
   complainantAddress: string;
+  createdBy: string;                // citizen Auth UID
 
-  // Complaint details
-  complaintType: string;
+  // What & where
+  complainType: ComplainTypeValue;  // always 'manhole' for this dashboard
+  dogType?: 'Stray' | 'Pet' | '';
   description: string;
-  priority: ComplaintPriority;
-  images: string[];
+  address: string;                  // issue address (free text)
+  complainCoordinates: Coordinates;
 
-  // Location
-  province: string;
+  // Geographic hierarchy
   division: string;
   district: string;
-  tehsil: string;
+  tahsil: string;                   // NB: schema spelling (not 'tehsil')
+
+  // UC/MC assignment
+  ucMcType: UcMcType;
+  ucMcNumber: string;
   ucId: string;
-  ucName: string;
-  coordinates: Coordinates;
-  locationAddress: string;
 
-  // Workflow status
-  status: ComplaintStatus;
-  approval: ComplaintApproval | null;
-
-  // Assignment
-  assignedTo: string | null;
-  assignedToName: string | null;
-  assignedBy: string | null;
+  // Department routing
+  departmentType: DepartmentType;
+  routingStrategy: RoutingStrategy;
+  wasaCategory: WasaCategoryValue | null;
+  assignedTo: string | null;        // employee UID
   assignedAt: Timestamp | null;
-  assignmentNotes: string | null;
 
-  // Resolution
-  resolvedAt: Timestamp | null;
-  resolutionNotes: string | null;
-  resolutionImages: string[];
-  rejectionReason: string | null;
+  // Status & resolution
+  complaintStatus: ComplaintStatus;
+  complaintApproval: string | null; // reserved
+  requestType: string | null;       // reserved
+  reason: string | null;            // populated when 'irrelevant'
+  actionTakenAt: Timestamp | null;
+  actionImage: string | null;
+  actionCoordinates: ActionCoordinates;
 
-  // Metadata
-  source: ComplaintSource;
-  submittedBy: string;
+  // Media
+  complaintImage: string;           // single download URL
+
+  // Audit
   createdAt: Timestamp;
-  updatedAt: Timestamp;
+  updatedAt: Timestamp | null;
 }

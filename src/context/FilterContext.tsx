@@ -24,7 +24,7 @@ import {
   isTehsilLocked,
   isDivisionLocked,
 } from "@/lib/scope";
-import type { AdminScope } from "@/types";
+import type { AdminScope, RoutingStrategy } from "@/types";
 
 /* -------------------------------------------------------------------------- */
 /*                               Public types                                 */
@@ -35,11 +35,15 @@ export interface FilterContextValue {
   selectedProvince: string;
   selectedDivision: string;
   selectedDistrict: string;
+  /** Tehsil from the admin's scope vocabulary; mapped to `tahsil` when querying complaints. */
   selectedTehsil: string;
   selectedUC: string;
-  selectedComplaintType: string;
+  /** WASA sub-category (no_water | sewerage_blockage | manhole_cover | …). */
+  selectedWasaCategory: string;
+  /** complaintStatus value (action_required | action_taken | irrelevant). */
   selectedStatus: string;
-  selectedPriority: string;
+  /** routingStrategy filter. '' = both, 'DEPT_DASHBOARD', or 'UC_MC_AUTO'. */
+  selectedRouting: "" | RoutingStrategy;
   selectedAssignee: string;
   dateRange: { from: Date | null; to: Date | null };
   search: string;
@@ -50,9 +54,9 @@ export interface FilterContextValue {
   setSelectedDistrict: (v: string) => void;
   setSelectedTehsil: (v: string) => void;
   setSelectedUC: (v: string) => void;
-  setSelectedComplaintType: (v: string) => void;
+  setSelectedWasaCategory: (v: string) => void;
   setSelectedStatus: (v: string) => void;
-  setSelectedPriority: (v: string) => void;
+  setSelectedRouting: (v: "" | RoutingStrategy) => void;
   setSelectedAssignee: (v: string) => void;
   setDateRange: (v: { from: Date | null; to: Date | null }) => void;
   setSearch: (v: string) => void;
@@ -78,9 +82,9 @@ export interface ActiveFiltersSnapshot {
   district: string;
   tehsil: string;
   uc: string;
-  complaintType: string;
+  wasaCategory: string;
   status: string;
-  priority: string;
+  routing: "" | RoutingStrategy;
   assignee: string;
   dateFrom: Date | null;
   dateTo: Date | null;
@@ -95,15 +99,14 @@ export interface ActiveFiltersSnapshot {
 const STORAGE_KEY = "wasa_filters";
 
 interface PersistedShape {
-  selectedComplaintType: string;
+  selectedWasaCategory: string;
   selectedStatus: string;
-  selectedPriority: string;
+  selectedRouting: "" | RoutingStrategy;
   selectedAssignee: string;
   selectedUC: string;
   dateFrom: string | null;
   dateTo: string | null;
   search: string;
-  // Non-locked geography only; locked fields are re-applied from the scope on mount.
   selectedProvince: string | null;
   selectedDivision: string | null;
   selectedDistrict: string | null;
@@ -111,7 +114,6 @@ interface PersistedShape {
 }
 
 const DEFAULT_PROVINCE = "Punjab";
-
 const isBrowser = (): boolean => typeof window !== "undefined";
 
 const parseDate = (iso: string | null | undefined): Date | null => {
@@ -128,9 +130,9 @@ const readPersisted = (): PersistedShape | null => {
     const parsed = JSON.parse(raw) as Partial<PersistedShape> | null;
     if (!parsed || typeof parsed !== "object") return null;
     return {
-      selectedComplaintType: (parsed.selectedComplaintType as string) ?? "",
+      selectedWasaCategory: (parsed.selectedWasaCategory as string) ?? "",
       selectedStatus: (parsed.selectedStatus as string) ?? "",
-      selectedPriority: (parsed.selectedPriority as string) ?? "",
+      selectedRouting: (parsed.selectedRouting as "" | RoutingStrategy) ?? "",
       selectedAssignee: (parsed.selectedAssignee as string) ?? "",
       selectedUC: (parsed.selectedUC as string) ?? "",
       dateFrom: (parsed.dateFrom as string | null) ?? null,
@@ -151,24 +153,12 @@ const writePersisted = (payload: PersistedShape): void => {
   try {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
-    // ignore quota / privacy-mode errors
+    /* ignore */
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/*                                  Context                                   */
-/* -------------------------------------------------------------------------- */
-
 const FilterContext = createContext<FilterContextValue | undefined>(undefined);
 
-/**
- * Resolves the initial geography state from the admin scope.
- *
- * CRITICAL: Locked scope fields come directly from the scope; persisted values
- * for locked fields are ignored so we can never re-hydrate a wider scope than
- * the user is entitled to see. This is part of the division-level fix
- * (see spec §4 and §8).
- */
 const resolveInitialGeography = (
   scope: AdminScope | null,
   persisted: PersistedShape | null,
@@ -178,7 +168,6 @@ const resolveInitialGeography = (
   district: string;
   tehsil: string;
 } => {
-  // No scope yet — fall back to persisted or defaults.
   if (!scope) {
     return {
       province: persisted?.selectedProvince ?? DEFAULT_PROVINCE,
@@ -187,8 +176,6 @@ const resolveInitialGeography = (
       tehsil: persisted?.selectedTehsil ?? "",
     };
   }
-
-  // Full access: everything unlocked, default to Punjab unless user previously picked something.
   if (scope.fullAccess) {
     return {
       province: persisted?.selectedProvince ?? DEFAULT_PROVINCE,
@@ -197,12 +184,9 @@ const resolveInitialGeography = (
       tehsil: persisted?.selectedTehsil ?? "",
     };
   }
-
   const scopeProvince = scope.province || DEFAULT_PROVINCE;
-
   switch (scope.accessLevel) {
     case "province":
-      // Province locked to scope; division/district/tehsil free-but-constrained.
       return {
         province: scopeProvince,
         division: persisted?.selectedDivision ?? "",
@@ -210,7 +194,6 @@ const resolveInitialGeography = (
         tehsil: persisted?.selectedTehsil ?? "",
       };
     case "division":
-      // Province + Division are locked — always sourced from scope, never persisted.
       return {
         province: scopeProvince,
         division: scope.division ?? "",
@@ -232,83 +215,45 @@ const resolveInitialGeography = (
         tehsil: scope.tehsil ?? "",
       };
     default:
-      return {
-        province: scopeProvince,
-        division: "",
-        district: "",
-        tehsil: "",
-      };
+      return { province: scopeProvince, division: "", district: "", tehsil: "" };
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/*                                 Provider                                   */
-/* -------------------------------------------------------------------------- */
-
-export const FilterProvider: React.FC<{ children: ReactNode }> = ({
-  children,
-}) => {
+export const FilterProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { adminScope } = useAuth();
+  const persistedRef = useRef<PersistedShape | null>(isBrowser() ? readPersisted() : null);
 
-  // Read persisted state once on mount.
-  const persistedRef = useRef<PersistedShape | null>(
-    isBrowser() ? readPersisted() : null,
-  );
-
-  // --- Geography state (initialized from scope + persistence) ----------------
   const initialGeo = useMemo(
     () => resolveInitialGeography(adminScope, persistedRef.current),
-    // resolved once on first render; adminScope sync handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  const [selectedProvince, setSelectedProvinceState] = useState<string>(
-    initialGeo.province,
-  );
-  const [selectedDivision, setSelectedDivisionState] = useState<string>(
-    initialGeo.division,
-  );
-  const [selectedDistrict, setSelectedDistrictState] = useState<string>(
-    initialGeo.district,
-  );
-  const [selectedTehsil, setSelectedTehsilState] = useState<string>(
-    initialGeo.tehsil,
-  );
+  const [selectedProvince, setSelectedProvinceState] = useState<string>(initialGeo.province);
+  const [selectedDivision, setSelectedDivisionState] = useState<string>(initialGeo.division);
+  const [selectedDistrict, setSelectedDistrictState] = useState<string>(initialGeo.district);
+  const [selectedTehsil, setSelectedTehsilState] = useState<string>(initialGeo.tehsil);
 
-  // --- Non-geographic filter state ------------------------------------------
-  const [selectedUC, setSelectedUC] = useState<string>(
-    persistedRef.current?.selectedUC ?? "",
-  );
-  const [selectedComplaintType, setSelectedComplaintType] = useState<string>(
-    persistedRef.current?.selectedComplaintType ?? "",
+  const [selectedUC, setSelectedUC] = useState<string>(persistedRef.current?.selectedUC ?? "");
+  const [selectedWasaCategory, setSelectedWasaCategory] = useState<string>(
+    persistedRef.current?.selectedWasaCategory ?? "",
   );
   const [selectedStatus, setSelectedStatus] = useState<string>(
     persistedRef.current?.selectedStatus ?? "",
   );
-  const [selectedPriority, setSelectedPriority] = useState<string>(
-    persistedRef.current?.selectedPriority ?? "",
+  const [selectedRouting, setSelectedRouting] = useState<"" | RoutingStrategy>(
+    persistedRef.current?.selectedRouting ?? "",
   );
   const [selectedAssignee, setSelectedAssignee] = useState<string>(
     persistedRef.current?.selectedAssignee ?? "",
   );
-  const [dateRange, setDateRange] = useState<{
-    from: Date | null;
-    to: Date | null;
-  }>(() => ({
+  const [dateRange, setDateRange] = useState<{ from: Date | null; to: Date | null }>(() => ({
     from: parseDate(persistedRef.current?.dateFrom ?? null),
     to: parseDate(persistedRef.current?.dateTo ?? null),
   }));
-  const [search, setSearch] = useState<string>(
-    persistedRef.current?.search ?? "",
-  );
+  const [search, setSearch] = useState<string>(persistedRef.current?.search ?? "");
 
-  /* -------------------------------------------------------------------- */
-  /*                       Scope sync (null -> value)                     */
-  /* -------------------------------------------------------------------- */
-  // When the admin scope transitions from null to a value (login) or changes,
-  // re-apply locked fields from scope. We deliberately overwrite any persisted
-  // locked field so a previously-wider selection can never leak through.
+  /* Scope sync (null -> value or scope change) ------------------------------ */
   const prevScopeKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const scopeKey = adminScope
@@ -321,23 +266,15 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
           adminScope.fullAccess ? "1" : "0",
         ].join("|")
       : null;
-
     if (scopeKey === prevScopeKeyRef.current) return;
     prevScopeKeyRef.current = scopeKey;
-
     if (!adminScope) return;
-
     const geo = resolveInitialGeography(adminScope, persistedRef.current);
-
     if (adminScope.fullAccess) {
-      // Full access — nothing is locked, but still align province default.
       setSelectedProvinceState((prev) => prev || geo.province);
       return;
     }
-
-    // Always overwrite locked fields with scope-derived values.
     setSelectedProvinceState(geo.province);
-
     if (
       adminScope.accessLevel === "division" ||
       adminScope.accessLevel === "district" ||
@@ -345,10 +282,7 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     ) {
       setSelectedDivisionState(geo.division);
     }
-    if (
-      adminScope.accessLevel === "district" ||
-      adminScope.accessLevel === "tehsil"
-    ) {
+    if (adminScope.accessLevel === "district" || adminScope.accessLevel === "tehsil") {
       setSelectedDistrictState(geo.district);
     }
     if (adminScope.accessLevel === "tehsil") {
@@ -356,38 +290,18 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [adminScope]);
 
-  /* -------------------------------------------------------------------- */
-  /*                            Derived lookups                           */
-  /* -------------------------------------------------------------------- */
-
   const provinceLocked = useMemo<boolean>(() => {
     if (!adminScope) return false;
     if (adminScope.fullAccess) return false;
-    // All non-full-access admins are locked to their province.
     return true;
   }, [adminScope]);
 
-  const divisionLocked = useMemo<boolean>(
-    () => isDivisionLocked(adminScope),
-    [adminScope],
-  );
-
-  const districtLocked = useMemo<boolean>(
-    () => isDistrictLocked(adminScope),
-    [adminScope],
-  );
-
-  const tehsilLocked = useMemo<boolean>(
-    () => isTehsilLocked(adminScope),
-    [adminScope],
-  );
+  const divisionLocked = useMemo<boolean>(() => isDivisionLocked(adminScope), [adminScope]);
+  const districtLocked = useMemo<boolean>(() => isDistrictLocked(adminScope), [adminScope]);
+  const tehsilLocked = useMemo<boolean>(() => isTehsilLocked(adminScope), [adminScope]);
 
   const availableProvinces = useMemo<string[]>(() => {
     if (!adminScope || adminScope.fullAccess) return [...PROVINCES];
-    if (adminScope.accessLevel === "province") {
-      return [adminScope.province || DEFAULT_PROVINCE];
-    }
-    // Division / district / tehsil admins are locked to a single province.
     return [adminScope.province || DEFAULT_PROVINCE];
   }, [adminScope]);
 
@@ -400,54 +314,33 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
         selectedProvince || adminScope.province || DEFAULT_PROVINCE,
       );
     }
-    // division / district / tehsil — locked to the scope's division.
     return adminScope.division ? [adminScope.division] : [];
   }, [adminScope, selectedProvince]);
 
   /**
-   * CRITICAL (division-level fix, spec §4 / §8):
-   *
-   * Division-level admins MUST only see districts inside their scope division
-   * (`getDistrictsForDivision(scope.division)`) — NEVER the raw DISTRICTS list
-   * or all-districts-for-province. Regressing this is a privilege-escalation
-   * bug; every district dropdown in the app pulls from this array.
+   * Division-level fix (spec §4 / §8): division admins MUST see only districts in their division.
    */
   const availableDistricts = useMemo<string[]>(() => {
-    // Full access: use the selected division if present, else all districts in province.
     if (!adminScope || adminScope.fullAccess) {
       if (selectedDivision) return getDistrictsForDivision(selectedDivision);
       return getAllDistrictsForProvince(selectedProvince || DEFAULT_PROVINCE);
     }
-
-    // Province admin: same shape as full-access, constrained to scope.province.
     if (adminScope.accessLevel === "province") {
       const province = adminScope.province || DEFAULT_PROVINCE;
       if (selectedDivision) return getDistrictsForDivision(selectedDivision);
       return getAllDistrictsForProvince(province);
     }
-
-    // Division admin: ONLY districts in the scope's division.
-    // Do NOT fall back to all-districts-for-province or raw DISTRICTS here.
     if (adminScope.accessLevel === "division") {
       return getDistrictsForDivision(adminScope.division ?? "");
     }
-
-    // District / tehsil: single-district scope.
     return adminScope.district ? [adminScope.district] : [];
   }, [adminScope, selectedProvince, selectedDivision]);
 
   const availableTehsils = useMemo<string[]>(() => {
-    // Tehsil admin is pinned to their single tehsil regardless of selection.
     if (adminScope && !adminScope.fullAccess && adminScope.accessLevel === "tehsil") {
       return adminScope.tehsil ? [adminScope.tehsil] : [];
     }
-
-    // If the user narrowed to a specific district, show only that district's tehsils.
-    if (selectedDistrict) {
-      return getTehsilsForDistrict(selectedDistrict);
-    }
-
-    // Otherwise, union of tehsils across all districts they're allowed to see.
+    if (selectedDistrict) return getTehsilsForDistrict(selectedDistrict);
     const seen = new Set<string>();
     const out: string[] = [];
     for (const d of availableDistricts) {
@@ -461,21 +354,12 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     return out;
   }, [adminScope, selectedDistrict, availableDistricts]);
 
-  // scopeDistricts is consumed verbatim by hooks for Firestore `where('district','in', ...)`.
-  const scopeDistricts = useMemo<string[]>(
-    () => getScopeDistricts(adminScope),
-    [adminScope],
-  );
-
-  /* -------------------------------------------------------------------- */
-  /*                    Cascading setters & auto-clearing                 */
-  /* -------------------------------------------------------------------- */
+  const scopeDistricts = useMemo<string[]>(() => getScopeDistricts(adminScope), [adminScope]);
 
   const setSelectedProvince = useCallback(
     (v: string) => {
       if (provinceLocked) return;
       setSelectedProvinceState(v);
-      // Province change invalidates downstream selections.
       setSelectedDivisionState("");
       setSelectedDistrictState("");
       setSelectedTehsilState("");
@@ -483,42 +367,34 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     },
     [provinceLocked],
   );
-
   const setSelectedDivision = useCallback(
     (v: string) => {
       if (divisionLocked) return;
       setSelectedDivisionState(v);
-      // Changing the division clears district and tehsil (and UC).
       setSelectedDistrictState("");
       setSelectedTehsilState("");
       setSelectedUC("");
     },
     [divisionLocked],
   );
-
   const setSelectedDistrict = useCallback(
     (v: string) => {
       if (districtLocked) return;
       setSelectedDistrictState(v);
-      // Changing the district clears tehsil and UC.
       setSelectedTehsilState("");
       setSelectedUC("");
     },
     [districtLocked],
   );
-
   const setSelectedTehsil = useCallback(
     (v: string) => {
       if (tehsilLocked) return;
       setSelectedTehsilState(v);
-      // Changing the tehsil clears UC.
       setSelectedUC("");
     },
     [tehsilLocked],
   );
 
-  // Auto-clear invalid district when scope/division changes and current
-  // selection is no longer in availableDistricts. Locked districts are exempt.
   useEffect(() => {
     if (districtLocked) return;
     if (!selectedDistrict) return;
@@ -529,7 +405,6 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [availableDistricts, selectedDistrict, districtLocked]);
 
-  // Auto-clear invalid tehsil when scope/district changes.
   useEffect(() => {
     if (tehsilLocked) return;
     if (!selectedTehsil) return;
@@ -539,7 +414,6 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [availableTehsils, selectedTehsil, tehsilLocked]);
 
-  // Auto-clear invalid division when scope/province changes.
   useEffect(() => {
     if (divisionLocked) return;
     if (!selectedDivision) return;
@@ -551,7 +425,6 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [availableDivisions, selectedDivision, divisionLocked]);
 
-  // Auto-clear invalid province when scope changes.
   useEffect(() => {
     if (provinceLocked) return;
     if (!selectedProvince) return;
@@ -564,23 +437,15 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [availableProvinces, selectedProvince, provinceLocked]);
 
-  /* -------------------------------------------------------------------- */
-  /*                              resetFilters                            */
-  /* -------------------------------------------------------------------- */
-
   const resetFilters = useCallback(() => {
-    // Clear all non-geographic filters.
-    setSelectedComplaintType("");
+    setSelectedWasaCategory("");
     setSelectedStatus("");
-    setSelectedPriority("");
+    setSelectedRouting("");
     setSelectedAssignee("");
     setSelectedUC("");
     setDateRange({ from: null, to: null });
     setSearch("");
-
-    // Reset geography to scope-derived baseline; locked fields stay pinned.
     const scope = adminScope;
-
     if (!scope || scope.fullAccess) {
       setSelectedProvinceState(DEFAULT_PROVINCE);
       setSelectedDivisionState("");
@@ -588,10 +453,8 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
       setSelectedTehsilState("");
       return;
     }
-
     const province = scope.province || DEFAULT_PROVINCE;
     setSelectedProvinceState(province);
-
     switch (scope.accessLevel) {
       case "province":
         setSelectedDivisionState("");
@@ -618,16 +481,11 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, [adminScope]);
 
-  /* -------------------------------------------------------------------- */
-  /*                         Persist to sessionStorage                    */
-  /* -------------------------------------------------------------------- */
   useEffect(() => {
-    // Persist unlocked fields + non-geo filters. Locked fields are re-sourced
-    // from scope on next mount to guard against cross-login leakage.
     const payload: PersistedShape = {
-      selectedComplaintType,
+      selectedWasaCategory,
       selectedStatus,
-      selectedPriority,
+      selectedRouting,
       selectedAssignee,
       selectedUC,
       dateFrom: dateRange.from ? dateRange.from.toISOString() : null,
@@ -640,9 +498,9 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     };
     writePersisted(payload);
   }, [
-    selectedComplaintType,
+    selectedWasaCategory,
     selectedStatus,
-    selectedPriority,
+    selectedRouting,
     selectedAssignee,
     selectedUC,
     dateRange,
@@ -657,10 +515,6 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     tehsilLocked,
   ]);
 
-  /* -------------------------------------------------------------------- */
-  /*                               Context value                          */
-  /* -------------------------------------------------------------------- */
-
   const value = useMemo<FilterContextValue>(
     () => ({
       selectedProvince,
@@ -668,32 +522,29 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
       selectedDistrict,
       selectedTehsil,
       selectedUC,
-      selectedComplaintType,
+      selectedWasaCategory,
       selectedStatus,
-      selectedPriority,
+      selectedRouting,
       selectedAssignee,
       dateRange,
       search,
-
       setSelectedProvince,
       setSelectedDivision,
       setSelectedDistrict,
       setSelectedTehsil,
       setSelectedUC,
-      setSelectedComplaintType,
+      setSelectedWasaCategory,
       setSelectedStatus,
-      setSelectedPriority,
+      setSelectedRouting,
       setSelectedAssignee,
       setDateRange,
       setSearch,
       resetFilters,
-
       availableProvinces,
       availableDivisions,
       availableDistricts,
       availableTehsils,
       scopeDistricts,
-
       provinceLocked,
       divisionLocked,
       districtLocked,
@@ -705,9 +556,9 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
       selectedDistrict,
       selectedTehsil,
       selectedUC,
-      selectedComplaintType,
+      selectedWasaCategory,
       selectedStatus,
-      selectedPriority,
+      selectedRouting,
       selectedAssignee,
       dateRange,
       search,
@@ -728,27 +579,15 @@ export const FilterProvider: React.FC<{ children: ReactNode }> = ({
     ],
   );
 
-  return (
-    <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
-  );
+  return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 };
-
-/* -------------------------------------------------------------------------- */
-/*                                   Hooks                                    */
-/* -------------------------------------------------------------------------- */
 
 export const useFilters = (): FilterContextValue => {
   const ctx = useContext(FilterContext);
-  if (!ctx) {
-    throw new Error("useFilters must be used within a FilterProvider");
-  }
+  if (!ctx) throw new Error("useFilters must be used within a FilterProvider");
   return ctx;
 };
 
-/**
- * Convenience hook returning a flat snapshot of the currently active filters
- * plus `scopeDistricts` — suitable for passing straight into a Firestore hook.
- */
 export const useActiveFilters = (): ActiveFiltersSnapshot => {
   const f = useFilters();
   return useMemo<ActiveFiltersSnapshot>(
@@ -758,9 +597,9 @@ export const useActiveFilters = (): ActiveFiltersSnapshot => {
       district: f.selectedDistrict,
       tehsil: f.selectedTehsil,
       uc: f.selectedUC,
-      complaintType: f.selectedComplaintType,
+      wasaCategory: f.selectedWasaCategory,
       status: f.selectedStatus,
-      priority: f.selectedPriority,
+      routing: f.selectedRouting,
       assignee: f.selectedAssignee,
       dateFrom: f.dateRange.from,
       dateTo: f.dateRange.to,
@@ -773,9 +612,9 @@ export const useActiveFilters = (): ActiveFiltersSnapshot => {
       f.selectedDistrict,
       f.selectedTehsil,
       f.selectedUC,
-      f.selectedComplaintType,
+      f.selectedWasaCategory,
       f.selectedStatus,
-      f.selectedPriority,
+      f.selectedRouting,
       f.selectedAssignee,
       f.dateRange.from,
       f.dateRange.to,

@@ -72,8 +72,8 @@ export function WorkloadChart({
             cursor={{ fill: "rgb(148 163 184 / 0.1)" }}
           />
           <Bar dataKey="active" radius={[6, 6, 0, 0]}>
-            {employees.map((e) => (
-              <Cell key={e.name} fill={barColor(e.active)} />
+            {employees.map((e, index) => (
+              <Cell key={`${e.name}-${index}`} fill={barColor(e.active)} />
             ))}
           </Bar>
         </BarChart>

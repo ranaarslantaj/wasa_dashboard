@@ -10,7 +10,8 @@ import {
 } from 'firebase/firestore';
 
 import { db } from '@/lib/firebase';
-import { SEED_COMPLAINT_TYPES } from '@/constants/complaintTypes';
+import { WASA_CATEGORIES } from '@/constants/wasaCategories';
+import { derivePriority } from '@/lib/derivePriority';
 import type { ComplaintType } from '@/types';
 import { noop, stableStringify } from './_useFirestoreQuery';
 
@@ -27,12 +28,19 @@ interface UseComplaintTypesResult {
 
 const HARD_LIMIT = 100;
 
-/** Build a synthetic ComplaintType list from the seed constant (used as a fallback
- *  so the UI renders before the Firestore collection is populated). */
+/** Build a synthetic ComplaintType list from the WASA category seed (used as a fallback
+ *  so the UI renders before any Firestore-backed catalog is populated). */
 const buildSeedFallback = (activeOnly?: boolean): ComplaintType[] => {
-  const seeded: ComplaintType[] = SEED_COMPLAINT_TYPES.map((t, idx) => ({
-    id: `seed-${t.key}-${idx}`,
-    ...t,
+  const seeded: ComplaintType[] = WASA_CATEGORIES.map((c, idx) => ({
+    id: `seed-${c.value}-${idx}`,
+    key: c.value,
+    label: c.label,
+    icon: c.icon,
+    color: c.color,
+    defaultPriority: derivePriority(c.value),
+    defaultDepartment: 'water_supply',
+    active: true,
+    sortOrder: idx,
   }));
   return activeOnly ? seeded.filter((t) => t.active) : seeded;
 };

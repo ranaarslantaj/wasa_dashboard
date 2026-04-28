@@ -2,21 +2,18 @@
 
 import { useMemo, useState } from "react";
 import {
-  Activity,
+  AlertTriangle,
   CheckCircle2,
-  ClipboardCheck,
   ClipboardList,
   Clock,
+  Inbox,
   Timer,
   UserCheck,
-  Users,
+  XCircle,
 } from "lucide-react";
 import {
-  differenceInHours,
   format,
   startOfDay,
-  startOfMonth,
-  startOfWeek,
   subDays,
 } from "date-fns";
 
@@ -31,15 +28,19 @@ import { cn } from "@/lib/cn";
 
 import { useAuth } from "@/context/AuthContext";
 import { useActiveFilters } from "@/context/FilterContext";
-import { useComplaints } from "@/hooks/useComplaints";
+import { useComplaints, type ComplaintsFilters } from "@/hooks/useComplaints";
 import { useWasaEmployees } from "@/hooks/useWasaEmployees";
-import { useComplaintTypes } from "@/hooks/useComplaintTypes";
 
 import { tsToDate } from "@/lib/firebase";
-import { formatTimeAgo } from "@/lib/formatters";
-import { COMPLAINT_TYPE_FALLBACK } from "@/constants/complaintTypes";
+import { formatTimeAgo, hoursBetween } from "@/lib/formatters";
+import { isOverdue } from "@/lib/derivePriority";
 import { STATUS_LABELS } from "@/constants/statuses";
-import type { Complaint, ComplaintStatus, WasaEmployee } from "@/types";
+import { wasaCategoryColor, wasaCategoryLabel } from "@/constants/wasaCategories";
+import type {
+  Complaint,
+  ComplaintStatus,
+  WasaEmployee,
+} from "@/types";
 
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import {
@@ -61,12 +62,9 @@ const WINDOW_OPTIONS: { value: Window; label: string }[] = [
 ];
 
 const STATUS_COLORS: Record<ComplaintStatus, string> = {
-  pending: "#94a3b8",
-  assigned: "#3b82f6",
-  in_progress: "#f59e0b",
-  resolved: "#10b981",
-  rejected: "#ef4444",
-  reopened: "#a855f7",
+  action_required: "#f59e0b",
+  action_taken: "#10b981",
+  irrelevant: "#ef4444",
 };
 
 const formatHours = (h: number | null): string => {
@@ -82,19 +80,20 @@ export default function DashboardPage() {
 
   const [windowKey, setWindowKey] = useState<Window>("30d");
 
-  const { from, to } = useMemo(() => {
+  const { from, to } = useMemo<{ from: Date | null; to: Date | null }>(() => {
     const now = new Date();
     if (windowKey === "all") return { from: null, to: null };
     const days = windowKey === "7d" ? 7 : windowKey === "30d" ? 30 : 90;
     return { from: subDays(now, days), to: now };
   }, [windowKey]);
 
-  const complaintFilters = useMemo(
+  const complaintFilters = useMemo<ComplaintsFilters>(
     () => ({
       scopeDistricts: f.scopeDistricts,
       district: f.district || undefined,
-      tehsil: f.tehsil || undefined,
-      complaintType: f.complaintType || undefined,
+      tahsil: f.tehsil || undefined,
+      wasaCategory: f.wasaCategory || undefined,
+      routingStrategy: f.routing || undefined,
       dateFrom: from,
       dateTo: to,
       limit: 1000,
@@ -103,7 +102,8 @@ export default function DashboardPage() {
       f.scopeDistricts,
       f.district,
       f.tehsil,
-      f.complaintType,
+      f.wasaCategory,
+      f.routing,
       from,
       to,
     ],
@@ -118,11 +118,8 @@ export default function DashboardPage() {
     [f.scopeDistricts],
   );
 
-  const typeFilters = useMemo(() => ({ activeOnly: true }), []);
-
   const { data: complaints, loading: cLoading } = useComplaints(complaintFilters);
   const { data: employees, loading: eLoading } = useWasaEmployees(employeeFilters);
-  const { data: types } = useComplaintTypes(typeFilters);
 
   /* ---- Scope label ---- */
   const scopeLabel = useMemo<string>(() => {
@@ -135,49 +132,39 @@ export default function DashboardPage() {
     return parts.join(" / ");
   }, [adminScope, hasFullAccess]);
 
-  /* ---- Type color lookup ---- */
-  const typeColorLookup = useMemo<Record<string, { label: string; color: string }>>(() => {
-    const out: Record<string, { label: string; color: string }> = {};
-    for (const key of Object.keys(COMPLAINT_TYPE_FALLBACK)) {
-      const f = COMPLAINT_TYPE_FALLBACK[key];
-      out[key] = { label: f.label, color: f.color };
-    }
-    for (const t of types) {
-      out[t.key] = { label: t.label, color: t.color };
-    }
-    return out;
-  }, [types]);
-
   /* ---- KPI stats ---- */
   const kpi = useMemo(() => {
-    const total = complaints.length;
-    let pending = 0;
-    let inProgress = 0;
-    let resolvedToday = 0;
-    let resolvedThisWeek = 0;
-    let resolvedThisMonth = 0;
+    let actionRequired = 0;
+    let actionTaken = 0;
+    let irrelevant = 0;
+    let pendingQueue = 0;
+    let overdue = 0;
     let resolvedCount = 0;
     let resolutionHoursSum = 0;
 
-    const now = new Date();
-    const todayStart = startOfDay(now);
-    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-    const monthStart = startOfMonth(now);
-
     for (const c of complaints) {
-      if (c.status === "pending") pending += 1;
-      if (c.status === "in_progress") inProgress += 1;
-      if (c.status === "resolved") {
-        const created = tsToDate(c.createdAt);
-        const resolved = tsToDate(c.resolvedAt);
-        if (resolved) {
-          if (resolved >= todayStart) resolvedToday += 1;
-          if (resolved >= weekStart) resolvedThisWeek += 1;
-          if (resolved >= monthStart) resolvedThisMonth += 1;
-        }
-        if (created && resolved) {
+      if (c.complaintStatus === "action_required") actionRequired += 1;
+      else if (c.complaintStatus === "action_taken") actionTaken += 1;
+      else if (c.complaintStatus === "irrelevant") irrelevant += 1;
+
+      if (
+        c.routingStrategy === "DEPT_DASHBOARD" &&
+        c.assignedTo == null &&
+        c.complaintStatus === "action_required"
+      ) {
+        pendingQueue += 1;
+      }
+
+      const created = tsToDate(c.createdAt);
+      if (isOverdue(created, c.complaintStatus)) {
+        overdue += 1;
+      }
+
+      if (c.complaintStatus === "action_taken") {
+        const h = hoursBetween(c.createdAt, c.actionTakenAt);
+        if (h !== null) {
+          resolutionHoursSum += h;
           resolvedCount += 1;
-          resolutionHoursSum += differenceInHours(resolved, created);
         }
       }
     }
@@ -186,12 +173,12 @@ export default function DashboardPage() {
       resolvedCount > 0 ? resolutionHoursSum / resolvedCount : null;
 
     return {
-      total,
-      pending,
-      inProgress,
-      resolvedToday,
-      resolvedThisWeek,
-      resolvedThisMonth,
+      total: complaints.length,
+      actionRequired,
+      actionTaken,
+      irrelevant,
+      pendingQueue,
+      overdue,
       avgResolutionHours,
     };
   }, [complaints]);
@@ -201,19 +188,26 @@ export default function DashboardPage() {
     [employees],
   );
 
+  /* ---- Employee uid -> name lookup ---- */
+  const employeeNameByUid = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const e of employees) {
+      if (e.uid) map[e.uid] = e.name || "Unnamed";
+    }
+    return map;
+  }, [employees]);
+
   /* ---- Charts: Over time ---- */
   const overTimeData = useMemo(() => {
     if (complaints.length === 0 && !from) {
       return [] as { date: string; count: number }[];
     }
-    // Determine range
     let start: Date;
     let end: Date;
     if (from && to) {
       start = startOfDay(from);
       end = startOfDay(to);
     } else {
-      // All-time window: compute from complaint createdAt bounds (cap at 90 days back for readability)
       const times: number[] = [];
       for (const c of complaints) {
         const d = tsToDate(c.createdAt);
@@ -225,7 +219,9 @@ export default function DashboardPage() {
       start = startOfDay(new Date(minT));
       end = startOfDay(new Date(maxT));
       const maxDays = 90;
-      const spanDays = Math.floor((end.getTime() - start.getTime()) / (24 * 3600 * 1000));
+      const spanDays = Math.floor(
+        (end.getTime() - start.getTime()) / (24 * 3600 * 1000),
+      );
       if (spanDays > maxDays) {
         start = startOfDay(subDays(end, maxDays));
       }
@@ -251,30 +247,27 @@ export default function DashboardPage() {
     }));
   }, [complaints, from, to]);
 
-  /* ---- Charts: By type ---- */
-  const byTypeData = useMemo(() => {
+  /* ---- Charts: By category ---- */
+  const byCategoryData = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of complaints) {
-      const k = c.complaintType || "unknown";
+      const k = c.wasaCategory ?? "others";
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     return Array.from(counts.entries())
-      .map(([key, count]) => {
-        const meta = typeColorLookup[key];
-        return {
-          type: meta?.label ?? key,
-          count,
-          color: meta?.color ?? "#64748b",
-        };
-      })
+      .map(([key, count]) => ({
+        type: wasaCategoryLabel(key),
+        count,
+        color: wasaCategoryColor(key),
+      }))
       .sort((a, b) => b.count - a.count);
-  }, [complaints, typeColorLookup]);
+  }, [complaints]);
 
-  /* ---- Charts: By tehsil ---- */
-  const byTehsilData = useMemo(() => {
+  /* ---- Charts: By tahsil ---- */
+  const byTahsilData = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of complaints) {
-      const k = c.tehsil || "Unknown";
+      const k = c.tahsil || "Unknown";
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     return Array.from(counts.entries())
@@ -287,7 +280,7 @@ export default function DashboardPage() {
   const statusPieData = useMemo(() => {
     const counts = new Map<ComplaintStatus, number>();
     for (const c of complaints) {
-      counts.set(c.status, (counts.get(c.status) ?? 0) + 1);
+      counts.set(c.complaintStatus, (counts.get(c.complaintStatus) ?? 0) + 1);
     }
     return Array.from(counts.entries())
       .map(([status, count]) => ({
@@ -329,15 +322,17 @@ export default function DashboardPage() {
 
   const recentlyAssigned = useMemo(() => {
     return sortByDate(
-      complaints.filter((c) => c.assignedAt && c.assignedToName),
+      complaints.filter((c) => c.assignedAt != null),
       (c) => tsToDate(c.assignedAt),
     ).slice(0, 5);
   }, [complaints]);
 
   const recentlyResolved = useMemo(() => {
     return sortByDate(
-      complaints.filter((c) => c.status === "resolved" && c.resolvedAt),
-      (c) => tsToDate(c.resolvedAt),
+      complaints.filter(
+        (c) => c.complaintStatus === "action_taken" && c.actionTakenAt != null,
+      ),
+      (c) => tsToDate(c.actionTakenAt),
     ).slice(0, 5);
   }, [complaints]);
 
@@ -385,7 +380,7 @@ export default function DashboardPage() {
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {cLoading ? (
-          Array.from({ length: 6 }).map((_, i) => (
+          Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-[98px] rounded-2xl" />
           ))
         ) : (
@@ -397,29 +392,36 @@ export default function DashboardPage() {
               accent="brand"
             />
             <KpiCard
-              label="Pending Assignment"
-              value={kpi.pending}
+              label="Action Required"
+              value={kpi.actionRequired}
               icon={Clock}
               accent="amber"
             />
             <KpiCard
-              label="In Progress"
-              value={kpi.inProgress}
-              icon={Activity}
-              accent="brand"
-            />
-            <KpiCard
-              label="Resolved Today"
-              value={kpi.resolvedToday}
-              subtext={`${kpi.resolvedThisWeek} this week`}
+              label="Resolved"
+              value={kpi.actionTaken}
               icon={CheckCircle2}
               accent="emerald"
             />
             <KpiCard
-              label="Resolved This Month"
-              value={kpi.resolvedThisMonth}
-              icon={ClipboardCheck}
-              accent="emerald"
+              label="Rejected"
+              value={kpi.irrelevant}
+              icon={XCircle}
+              accent="red"
+            />
+            <KpiCard
+              label="Pending Queue"
+              value={kpi.pendingQueue}
+              subtext="Unassigned dept queue"
+              icon={Inbox}
+              accent="amber"
+            />
+            <KpiCard
+              label="Overdue"
+              value={kpi.overdue}
+              subtext=">72h pending"
+              icon={AlertTriangle}
+              accent="red"
             />
             <KpiCard
               label="Avg Resolution"
@@ -433,12 +435,6 @@ export default function DashboardPage() {
               subtext={`${employees.length} total`}
               icon={UserCheck}
               accent="brand"
-            />
-            <KpiCard
-              label="Resolved This Week"
-              value={kpi.resolvedThisWeek}
-              icon={Users}
-              accent="emerald"
             />
           </>
         )}
@@ -465,17 +461,17 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Complaints by type</CardTitle>
+            <CardTitle>By Category</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             {loading ? (
               <Skeleton className="h-[280px]" />
-            ) : byTypeData.length === 0 ? (
+            ) : byCategoryData.length === 0 ? (
               <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
                 No data.
               </p>
             ) : (
-              <ByTypeChart data={byTypeData} />
+              <ByTypeChart data={byCategoryData} />
             )}
           </CardContent>
         </Card>
@@ -502,17 +498,17 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Complaints by tehsil (top 10)</CardTitle>
+            <CardTitle>Complaints by tahsil (top 10)</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             {loading ? (
               <Skeleton className="h-[280px]" />
-            ) : byTehsilData.length === 0 ? (
+            ) : byTahsilData.length === 0 ? (
               <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
                 No data.
               </p>
             ) : (
-              <ByTehsilChart data={byTehsilData} />
+              <ByTehsilChart data={byTahsilData} />
             )}
           </CardContent>
         </Card>
@@ -545,8 +541,7 @@ export default function DashboardPage() {
           items={latestComplaints.map((c) => ({
             id: c.id,
             primary: c.complaintId || c.id,
-            secondary:
-              typeColorLookup[c.complaintType]?.label ?? c.complaintType,
+            secondary: wasaCategoryLabel(c.wasaCategory),
             meta: formatTimeAgo(c.createdAt),
             href: "/complaints",
           }))}
@@ -558,7 +553,9 @@ export default function DashboardPage() {
           items={recentlyAssigned.map((c) => ({
             id: c.id,
             primary: c.complaintId || c.id,
-            secondary: c.assignedToName ?? "Unassigned",
+            secondary: c.assignedTo
+              ? employeeNameByUid[c.assignedTo] ?? "Assigned"
+              : "Unassigned",
             meta: formatTimeAgo(c.assignedAt),
             href: "/complaints",
           }))}
@@ -570,8 +567,10 @@ export default function DashboardPage() {
           items={recentlyResolved.map((c) => ({
             id: c.id,
             primary: c.complaintId || c.id,
-            secondary: c.assignedToName ?? "Unknown",
-            meta: formatTimeAgo(c.resolvedAt),
+            secondary: c.assignedTo
+              ? employeeNameByUid[c.assignedTo] ?? "Resolved"
+              : "Resolved",
+            meta: formatTimeAgo(c.actionTakenAt),
             href: "/complaints",
           }))}
         />

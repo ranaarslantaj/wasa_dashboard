@@ -7,10 +7,11 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/cn";
 import { rankEmployees, workloadBadgeClass } from "@/lib/smartAssignment";
+import { wasaCategoryLabel } from "@/constants/wasaCategories";
 import type { Complaint, WasaEmployee } from "@/types";
 
 export interface AssignEmployeePickerProps {
-  complaint: Complaint;
+  complaint: Pick<Complaint, "wasaCategory" | "division" | "district" | "tahsil">;
   employees: WasaEmployee[];
   loading: boolean;
   onAssign: (employeeId: string, notes: string) => Promise<void>;
@@ -33,8 +34,20 @@ export function AssignEmployeePicker({
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const ranked = useMemo(
-    () => rankEmployees(employees, complaint),
-    [employees, complaint]
+    () =>
+      rankEmployees(employees, {
+        wasaCategory: complaint.wasaCategory,
+        division: complaint.division,
+        district: complaint.district,
+        tahsil: complaint.tahsil,
+      }),
+    [
+      employees,
+      complaint.wasaCategory,
+      complaint.division,
+      complaint.district,
+      complaint.tahsil,
+    ]
   );
 
   const filtered = useMemo(() => {
@@ -61,6 +74,11 @@ export function AssignEmployeePicker({
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-300">
+        <span className="font-semibold">Assigning:</span>{" "}
+        {wasaCategoryLabel(complaint.wasaCategory)}
+      </div>
+
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -92,7 +110,8 @@ export function AssignEmployeePicker({
           <ul className="divide-y divide-slate-200 dark:divide-slate-800">
             {filtered.map((e) => {
               const selected =
-                selectedId !== "" && (selectedId === e.uid || selectedId === e.id);
+                selectedId !== "" &&
+                (selectedId === e.uid || selectedId === e.id);
               const workload = e.currentAssignments ?? 0;
               return (
                 <li key={e.id}>
@@ -133,18 +152,19 @@ export function AssignEmployeePicker({
                         {e.district ? ` · ${e.district}` : ""}
                         {e.tehsil ? ` · ${e.tehsil}` : ""}
                       </div>
-                      {Array.isArray(e.specialization) && e.specialization.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {e.specialization.slice(0, 4).map((s) => (
-                            <span
-                              key={s}
-                              className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                            >
-                              {s.replace(/_/g, " ")}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      {Array.isArray(e.specialization) &&
+                        e.specialization.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {e.specialization.slice(0, 4).map((s) => (
+                              <span
+                                key={s}
+                                className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                              >
+                                {s.replace(/_/g, " ")}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       {e.reason.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {e.reason.map((r) => (

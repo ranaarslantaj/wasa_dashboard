@@ -32,23 +32,27 @@ import { cn } from "@/lib/cn";
 
 import { useFilters, useActiveFilters } from "@/context/FilterContext";
 import { useWasaEmployees } from "@/hooks/useWasaEmployees";
-import { useAssignments } from "@/hooks/useAssignments";
 import { useComplaints } from "@/hooks/useComplaints";
 
 import { tsToDate } from "@/lib/firebase";
 import { workloadBadgeClass } from "@/lib/smartAssignment";
-import { formatDate } from "@/lib/formatters";
-import { STATUS_BADGE, STATUS_LABELS } from "@/constants/statuses";
+import { formatDateTime, formatTimeAgo } from "@/lib/formatters";
+import {
+  STATUS_BADGE,
+  STATUS_LABELS,
+} from "@/constants/statuses";
+import {
+  wasaCategoryLabel,
+  wasaCategoryColor,
+} from "@/constants/wasaCategories";
 
 import type {
-  Assignment,
-  AssignmentStatus,
   Complaint,
+  ComplaintStatus,
   WasaEmployee,
 } from "@/types";
 
 import { WorkloadChart } from "@/components/assignments/WorkloadChart";
-import { AssignmentTimeline } from "@/components/assignments/AssignmentTimeline";
 
 type TabId = "by_employee" | "by_date" | "by_status";
 
@@ -58,21 +62,11 @@ const TABS = [
   { id: "by_status" as TabId, label: "By Status" },
 ];
 
-const ASSIGNMENT_STATUS_ORDER: AssignmentStatus[] = [
-  "assigned",
-  "in_progress",
-  "resolved",
-  "reassigned",
-  "rejected",
+const STATUS_ORDER: ComplaintStatus[] = [
+  "action_required",
+  "action_taken",
+  "irrelevant",
 ];
-
-const ASSIGNMENT_STATUS_LABEL: Record<AssignmentStatus, string> = {
-  assigned: "Assigned",
-  in_progress: "In Progress",
-  resolved: "Resolved",
-  reassigned: "Reassigned",
-  rejected: "Rejected",
-};
 
 const DATE_RANGE_OPTIONS = [
   { value: "", label: "All dates" },
@@ -98,53 +92,38 @@ export default function AssignmentsPage() {
     [f.scopeDistricts, f.district, f.tehsil],
   );
 
-  const assignmentsFilters = useMemo(() => ({ limit: 500 }), []);
-
   const complaintFilters = useMemo(
     () => ({
       scopeDistricts: f.scopeDistricts,
       district: f.district || undefined,
-      tehsil: f.tehsil || undefined,
+      tahsil: f.tehsil || undefined,
       limit: 1000,
     }),
     [f.scopeDistricts, f.district, f.tehsil],
   );
 
   const { data: employees, loading: eLoading } = useWasaEmployees(empFilters);
-  const { data: assignments, loading: aLoading } =
-    useAssignments(assignmentsFilters);
-  const { data: complaints } = useComplaints(complaintFilters);
+  const { data: complaints, loading: cLoading } = useComplaints(complaintFilters);
 
-  /* ---- Date range filter for assignments ---- */
-  const filteredAssignments = useMemo<Assignment[]>(() => {
-    if (!dateRange) return assignments;
+  /* Apply date-range filter on `assignedAt` (when assigned). */
+  const dateFiltered = useMemo<Complaint[]>(() => {
+    if (!dateRange) return complaints;
     const days = Number(dateRange);
-    if (!Number.isFinite(days) || days <= 0) return assignments;
+    if (!Number.isFinite(days) || days <= 0) return complaints;
     const cutoff = subDays(new Date(), days);
-    return assignments.filter((a) => {
-      const ts = tsToDate(a.timestamp);
+    return complaints.filter((c) => {
+      if (!c.assignedAt) return false;
+      const ts = tsToDate(c.assignedAt);
       return ts ? isAfter(ts, cutoff) : false;
     });
-  }, [assignments, dateRange]);
+  }, [complaints, dateRange]);
 
-  /* ---- Scope-filter assignments by employeeId (only employees in scope) ---- */
-  const scopedEmployeeIds = useMemo<Set<string>>(() => {
-    return new Set(employees.map((e) => e.uid).filter(Boolean));
-  }, [employees]);
-
-  const scopedAssignments = useMemo<Assignment[]>(() => {
-    if (scopedEmployeeIds.size === 0) return filteredAssignments;
-    return filteredAssignments.filter(
-      (a) => !a.employeeId || scopedEmployeeIds.has(a.employeeId),
-    );
-  }, [filteredAssignments, scopedEmployeeIds]);
-
-  /* ---- Active complaints per employee (uid) ---- */
+  /* Active complaints per employee uid (action_required only) */
   const activeComplaintsByEmpUid = useMemo<Map<string, Complaint[]>>(() => {
     const map = new Map<string, Complaint[]>();
     for (const c of complaints) {
       if (!c.assignedTo) continue;
-      if (c.status === "resolved" || c.status === "rejected") continue;
+      if (c.complaintStatus !== "action_required") continue;
       const list = map.get(c.assignedTo) ?? [];
       list.push(c);
       map.set(c.assignedTo, list);
@@ -152,13 +131,9 @@ export default function AssignmentsPage() {
     return map;
   }, [complaints]);
 
-  /* ---- By Employee: workload chart data ---- */
   const workloadChartData = useMemo(() => {
     return [...employees]
-      .sort(
-        (a, b) =>
-          (b.currentAssignments ?? 0) - (a.currentAssignments ?? 0),
-      )
+      .sort((a, b) => (b.currentAssignments ?? 0) - (a.currentAssignments ?? 0))
       .slice(0, 15)
       .map((e) => ({
         name: e.name || "Unknown",
@@ -166,55 +141,47 @@ export default function AssignmentsPage() {
       }));
   }, [employees]);
 
-  /* ---- By Date: group assignments ---- */
-  const assignmentsByDateBucket = useMemo(() => {
+  /* By Date: bucket assigned complaints by `assignedAt` */
+  const byDateBuckets = useMemo(() => {
     const now = new Date();
     const todayStart = startOfDay(now);
     const yesterday = startOfDay(subDays(now, 1));
     const weekStart = startOfWeek(now, { weekStartsOn: 1 });
 
     const buckets = {
-      today: [] as Assignment[],
-      yesterday: [] as Assignment[],
-      thisWeek: [] as Assignment[],
-      earlier: [] as Assignment[],
+      today: [] as Complaint[],
+      yesterday: [] as Complaint[],
+      thisWeek: [] as Complaint[],
+      earlier: [] as Complaint[],
     };
 
-    for (const a of scopedAssignments) {
-      const ts = tsToDate(a.timestamp);
-      if (!ts) {
-        buckets.earlier.push(a);
-        continue;
-      }
-      if (isSameDay(ts, todayStart)) buckets.today.push(a);
-      else if (isSameDay(ts, yesterday)) buckets.yesterday.push(a);
-      else if (isAfter(ts, weekStart)) buckets.thisWeek.push(a);
-      else buckets.earlier.push(a);
+    for (const c of dateFiltered) {
+      const ts = tsToDate(c.assignedAt);
+      if (!ts) continue;
+      if (isSameDay(ts, todayStart)) buckets.today.push(c);
+      else if (isSameDay(ts, yesterday)) buckets.yesterday.push(c);
+      else if (isAfter(ts, weekStart)) buckets.thisWeek.push(c);
+      else buckets.earlier.push(c);
     }
-
     return buckets;
-  }, [scopedAssignments]);
+  }, [dateFiltered]);
 
-  /* ---- By Status: group assignments ---- */
-  const assignmentsByStatus = useMemo<
-    Partial<Record<AssignmentStatus, Assignment[]>>
-  >(() => {
-    const map: Partial<Record<AssignmentStatus, Assignment[]>> = {};
-    for (const a of scopedAssignments) {
-      const key = a.status;
+  /* By Status: group complaints by complaintStatus */
+  const byStatus = useMemo<Partial<Record<ComplaintStatus, Complaint[]>>>(() => {
+    const map: Partial<Record<ComplaintStatus, Complaint[]>> = {};
+    for (const c of dateFiltered) {
+      const key = c.complaintStatus;
       if (!map[key]) map[key] = [];
-      map[key]!.push(a);
+      map[key]!.push(c);
     }
     return map;
-  }, [scopedAssignments]);
+  }, [dateFiltered]);
 
-  const loading = eLoading || aLoading;
+  const loading = eLoading || cLoading;
 
   const toggleEmp = (id: string): void => {
     setExpandedEmp((s) => ({ ...s, [id]: !s[id] }));
   };
-
-  /* ---- UI bits ---- */
 
   const districtOptions = useMemo(
     () => [
@@ -239,14 +206,14 @@ export default function AssignmentsPage() {
           Assignments
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Track complaint assignments, workload, and history across your scope.
+          Track complaint assignments and workload across your scope.
         </p>
       </div>
 
       {/* Filter bar */}
       <Card>
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
                 District
@@ -271,7 +238,7 @@ export default function AssignmentsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Date range
+                Date range (assigned)
               </label>
               <Dropdown
                 value={dateRange}
@@ -303,9 +270,9 @@ export default function AssignmentsPage() {
           onToggle={toggleEmp}
         />
       ) : tab === "by_date" ? (
-        <ByDateTab buckets={assignmentsByDateBucket} />
+        <ByDateTab buckets={byDateBuckets} />
       ) : (
-        <ByStatusTab byStatus={assignmentsByStatus} />
+        <ByStatusTab byStatus={byStatus} />
       )}
     </div>
   );
@@ -357,16 +324,12 @@ function ByEmployeeTab({
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {[...employees]
-          .sort(
-            (a, b) =>
-              (b.currentAssignments ?? 0) - (a.currentAssignments ?? 0),
-          )
+          .sort((a, b) => (b.currentAssignments ?? 0) - (a.currentAssignments ?? 0))
           .map((emp) => {
             const active = emp.currentAssignments ?? 0;
             const overloaded = active >= 10;
             const expanded = !!expandedEmp[emp.id];
-            const complaintsList =
-              activeComplaintsByEmpUid.get(emp.uid ?? "") ?? [];
+            const complaintsList = activeComplaintsByEmpUid.get(emp.uid ?? "") ?? [];
             return (
               <Card
                 key={emp.id}
@@ -392,10 +355,7 @@ function ByEmployeeTab({
                         {active} active
                       </Badge>
                       {overloaded && (
-                        <Badge
-                          variant="danger"
-                          className="gap-1 whitespace-nowrap"
-                        >
+                        <Badge variant="danger" className="gap-1 whitespace-nowrap">
                           <AlertTriangle className="h-3 w-3" aria-hidden />
                           Overloaded
                         </Badge>
@@ -405,17 +365,13 @@ function ByEmployeeTab({
 
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
-                      <p className="text-slate-500 dark:text-slate-400">
-                        Active
-                      </p>
+                      <p className="text-slate-500 dark:text-slate-400">Active</p>
                       <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-slate-100">
                         {active}
                       </p>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
-                      <p className="text-slate-500 dark:text-slate-400">
-                        Resolved
-                      </p>
+                      <p className="text-slate-500 dark:text-slate-400">Resolved</p>
                       <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-slate-100">
                         {emp.totalResolved ?? 0}
                       </p>
@@ -451,8 +407,8 @@ function ByEmployeeTab({
                             <span className="truncate text-xs text-slate-700 dark:text-slate-200">
                               {c.complaintId || c.id}
                             </span>
-                            <Badge className={STATUS_BADGE[c.status]}>
-                              {STATUS_LABELS[c.status]}
+                            <Badge className={STATUS_BADGE[c.complaintStatus]}>
+                              {STATUS_LABELS[c.complaintStatus]}
                             </Badge>
                           </li>
                         ))
@@ -476,13 +432,13 @@ function ByDateTab({
   buckets,
 }: {
   buckets: {
-    today: Assignment[];
-    yesterday: Assignment[];
-    thisWeek: Assignment[];
-    earlier: Assignment[];
+    today: Complaint[];
+    yesterday: Complaint[];
+    thisWeek: Complaint[];
+    earlier: Complaint[];
   };
 }) {
-  const sections: { key: string; label: string; items: Assignment[] }[] = [
+  const sections: { key: string; label: string; items: Complaint[] }[] = [
     { key: "today", label: "Today", items: buckets.today },
     { key: "yesterday", label: "Yesterday", items: buckets.yesterday },
     { key: "thisWeek", label: "This Week", items: buckets.thisWeek },
@@ -500,7 +456,7 @@ function ByDateTab({
       <EmptyState
         icon={CalendarDays}
         title="No assignments"
-        description="There are no assignments in this date range or scope."
+        description="There are no assigned complaints in this date range or scope."
       />
     );
   }
@@ -520,7 +476,7 @@ function ByDateTab({
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              <AssignmentTimeline assignments={s.items} />
+              <ComplaintList items={s.items} />
             </CardContent>
           </Card>
         ))}
@@ -535,9 +491,9 @@ function ByDateTab({
 function ByStatusTab({
   byStatus,
 }: {
-  byStatus: Partial<Record<AssignmentStatus, Assignment[]>>;
+  byStatus: Partial<Record<ComplaintStatus, Complaint[]>>;
 }) {
-  const total = ASSIGNMENT_STATUS_ORDER.reduce(
+  const total = STATUS_ORDER.reduce(
     (acc, s) => acc + (byStatus[s]?.length ?? 0),
     0,
   );
@@ -546,23 +502,17 @@ function ByStatusTab({
     return (
       <EmptyState
         icon={ClipboardList}
-        title="No assignments"
-        description="There are no assignments in this scope."
+        title="No complaints"
+        description="There are no complaints in this scope."
       />
     );
   }
 
   return (
     <div className="space-y-4">
-      {ASSIGNMENT_STATUS_ORDER.filter((s) => (byStatus[s]?.length ?? 0) > 0).map(
-        (s) => (
-          <StatusSection
-            key={s}
-            status={s}
-            items={byStatus[s] ?? []}
-          />
-        ),
-      )}
+      {STATUS_ORDER.filter((s) => (byStatus[s]?.length ?? 0) > 0).map((s) => (
+        <StatusSection key={s} status={s} items={byStatus[s] ?? []} />
+      ))}
     </div>
   );
 }
@@ -571,11 +521,10 @@ function StatusSection({
   status,
   items,
 }: {
-  status: AssignmentStatus;
-  items: Assignment[];
+  status: ComplaintStatus;
+  items: Complaint[];
 }) {
   const [open, setOpen] = useState<boolean>(true);
-
   return (
     <Card>
       <button
@@ -590,21 +539,81 @@ function StatusSection({
             ) : (
               <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden />
             )}
-            <CardTitle>{ASSIGNMENT_STATUS_LABEL[status]}</CardTitle>
+            <CardTitle>{STATUS_LABELS[status]}</CardTitle>
             <span className="text-xs text-slate-500 dark:text-slate-400">
               ({items.length})
             </span>
           </div>
-          <span className="text-xs text-slate-400">
-            {items[0] ? `Last: ${formatDate(items[0].timestamp)}` : ""}
-          </span>
         </div>
       </button>
       {open && (
         <CardContent className="pt-0">
-          <AssignmentTimeline assignments={items} />
+          <ComplaintList items={items} />
         </CardContent>
       )}
     </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Shared list                                                                */
+/* -------------------------------------------------------------------------- */
+
+function ComplaintList({ items }: { items: Complaint[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+        Empty.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {items.map((c) => {
+        const cat = c.wasaCategory;
+        const color = wasaCategoryColor(cat);
+        const label = wasaCategoryLabel(cat);
+        const assigneeName =
+          (c as Complaint & { assignedToName?: string | null }).assignedToName ??
+          c.assignedTo;
+        return (
+          <li
+            key={c.id}
+            className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: color }}
+                  aria-hidden
+                />
+                <span className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                  {c.complaintId || c.id}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {label}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                {assigneeName ? `Assigned to ${assigneeName}` : "Unassigned"}
+                {c.assignedAt ? ` · ${formatTimeAgo(c.assignedAt)}` : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className={STATUS_BADGE[c.complaintStatus]}>
+                {STATUS_LABELS[c.complaintStatus]}
+              </Badge>
+              <span
+                className="hidden text-xs text-slate-400 sm:inline"
+                title={formatDateTime(c.assignedAt ?? c.createdAt)}
+              >
+                {formatTimeAgo(c.assignedAt ?? c.createdAt)}
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

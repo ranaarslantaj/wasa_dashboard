@@ -5,6 +5,7 @@ export type AssignmentStatus =
   | 'in_progress'
   | 'resolved'
   | 'reassigned'
+  | 'unassigned'
   | 'rejected';
 
 export interface Assignment {

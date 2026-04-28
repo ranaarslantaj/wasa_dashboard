@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { differenceInHours, format } from "date-fns";
+import { format } from "date-fns";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
 
 import {
@@ -16,37 +16,45 @@ import { cn } from "@/lib/cn";
 
 import { useActiveFilters, useFilters } from "@/context/FilterContext";
 import { useToast } from "@/context/ToastContext";
-import { useComplaints } from "@/hooks/useComplaints";
-import { useComplaintTypes } from "@/hooks/useComplaintTypes";
+import { useComplaints, type ComplaintsFilters } from "@/hooks/useComplaints";
+import { useWasaEmployees } from "@/hooks/useWasaEmployees";
 
-import { tsToDate } from "@/lib/firebase";
+import { hoursBetween } from "@/lib/formatters";
 import { exportToPdf } from "@/lib/exportPdf";
 import { exportToExcel } from "@/lib/exportExcel";
-import { COMPLAINT_TYPE_FALLBACK } from "@/constants/complaintTypes";
+import {
+  WASA_CATEGORIES,
+  wasaCategoryLabel,
+  type WasaCategoryValue,
+} from "@/constants/wasaCategories";
 
-import type { Complaint, ComplaintStatus } from "@/types";
+import type {
+  Complaint,
+  ComplaintStatus,
+  RoutingStrategy,
+} from "@/types";
 
 import { ReportTable, type ReportRow } from "@/components/reports/ReportTable";
 import { ExportConfirmModal } from "@/components/complaints/ExportConfirmModal";
 
-type GroupBy = "tehsil" | "uc" | "complaint_type" | "employee";
+type GroupBy = "tahsil" | "wasa_category" | "routing" | "employee";
 
 const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "tehsil", label: "Tehsil" },
-  { value: "uc", label: "UC" },
-  { value: "complaint_type", label: "Complaint Type" },
+  { value: "tahsil", label: "Tahsil" },
+  { value: "wasa_category", label: "Category" },
+  { value: "routing", label: "Routing" },
   { value: "employee", label: "Employee" },
 ];
 
 const GROUP_BY_COLUMN_LABEL: Record<GroupBy, string> = {
-  tehsil: "Tehsil",
-  uc: "Union Council",
-  complaint_type: "Complaint Type",
+  tahsil: "Tahsil",
+  wasa_category: "Category",
+  routing: "Routing",
   employee: "Employee",
 };
 
 const STATUS_CHIPS: {
-  key: ComplaintStatus | "total";
+  key: "total" | ComplaintStatus;
   label: string;
   classes: string;
 }[] = [
@@ -56,24 +64,19 @@ const STATUS_CHIPS: {
     classes: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
   },
   {
-    key: "pending",
-    label: "Pending",
-    classes: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  },
-  {
-    key: "in_progress",
-    label: "In Progress",
+    key: "action_required",
+    label: "Action Required",
     classes:
       "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   },
   {
-    key: "resolved",
+    key: "action_taken",
     label: "Resolved",
     classes:
       "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   },
   {
-    key: "rejected",
+    key: "irrelevant",
     label: "Rejected",
     classes: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
   },
@@ -85,6 +88,17 @@ const DATE_RANGE_OPTIONS = [
   { value: "30", label: "Last 30 days" },
   { value: "90", label: "Last 90 days" },
 ];
+
+const ROUTING_OPTIONS: { value: "" | RoutingStrategy; label: string }[] = [
+  { value: "", label: "All routings" },
+  { value: "DEPT_DASHBOARD", label: "Dept Queue" },
+  { value: "UC_MC_AUTO", label: "UC/MC Auto" },
+];
+
+const ROUTING_LABEL: Record<RoutingStrategy, string> = {
+  DEPT_DASHBOARD: "Dept Queue",
+  UC_MC_AUTO: "UC/MC Auto",
+};
 
 const formatHoursForExport = (h: number | null): string => {
   if (h === null || !Number.isFinite(h)) return "-";
@@ -98,7 +112,7 @@ export default function ReportsPage() {
   const filters = useFilters();
   const toast = useToast();
 
-  const [groupBy, setGroupBy] = useState<GroupBy>("tehsil");
+  const [groupBy, setGroupBy] = useState<GroupBy>("tahsil");
   const [dateRange, setDateRange] = useState<string>("");
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [excelModalOpen, setExcelModalOpen] = useState(false);
@@ -116,12 +130,13 @@ export default function ReportsPage() {
     return { from, to };
   }, [dateRange]);
 
-  const complaintFilters = useMemo(
+  const complaintFilters = useMemo<ComplaintsFilters>(
     () => ({
       scopeDistricts: f.scopeDistricts,
       district: f.district || undefined,
-      tehsil: f.tehsil || undefined,
-      complaintType: f.complaintType || undefined,
+      tahsil: f.tehsil || undefined,
+      wasaCategory: f.wasaCategory || undefined,
+      routingStrategy: f.routing || undefined,
       dateFrom: dateBounds.from,
       dateTo: dateBounds.to,
       limit: 1000,
@@ -130,143 +145,132 @@ export default function ReportsPage() {
       f.scopeDistricts,
       f.district,
       f.tehsil,
-      f.complaintType,
+      f.wasaCategory,
+      f.routing,
       dateBounds.from,
       dateBounds.to,
     ],
   );
 
-  const { data: complaints, loading } = useComplaints(complaintFilters);
-  const { data: types } = useComplaintTypes({ activeOnly: false });
+  const employeeFilters = useMemo(
+    () => ({
+      scopeDistricts: f.scopeDistricts,
+      activeOnly: false,
+      limit: 1000,
+    }),
+    [f.scopeDistricts],
+  );
 
-  const typeLabelLookup = useMemo<Record<string, string>>(() => {
+  const { data: complaints, loading } = useComplaints(complaintFilters);
+  const { data: employees } = useWasaEmployees(employeeFilters);
+
+  /* ---- Employee uid -> name lookup ---- */
+  const employeeNameByUid = useMemo<Record<string, string>>(() => {
     const out: Record<string, string> = {};
-    for (const k of Object.keys(COMPLAINT_TYPE_FALLBACK)) {
-      out[k] = COMPLAINT_TYPE_FALLBACK[k].label;
+    for (const e of employees) {
+      if (e.uid) out[e.uid] = e.name || "Unnamed";
     }
-    for (const t of types) out[t.key] = t.label;
     return out;
-  }, [types]);
+  }, [employees]);
 
   /* ---- Top-level stats chips ---- */
   const statsCounts = useMemo(() => {
-    const out: Record<ComplaintStatus | "total", number> = {
+    const out: Record<"total" | ComplaintStatus, number> = {
       total: complaints.length,
-      pending: 0,
-      assigned: 0,
-      in_progress: 0,
-      resolved: 0,
-      rejected: 0,
-      reopened: 0,
+      action_required: 0,
+      action_taken: 0,
+      irrelevant: 0,
     };
     for (const c of complaints) {
-      out[c.status] = (out[c.status] ?? 0) + 1;
+      out[c.complaintStatus] = (out[c.complaintStatus] ?? 0) + 1;
     }
     return out;
   }, [complaints]);
 
   /* ---- Aggregation ---- */
   const rows = useMemo<ReportRow[]>(() => {
+    type Bucket = {
+      key: string;
+      label: string;
+      total: number;
+      action_required: number;
+      action_taken: number;
+      irrelevant: number;
+      resolutionHoursSum: number;
+      resolvedCount: number;
+    };
+
     const keyFor = (c: Complaint): string => {
       switch (groupBy) {
-        case "tehsil":
-          return c.tehsil || "Unknown";
-        case "uc":
-          return c.ucName || "Unknown";
-        case "complaint_type":
-          return c.complaintType || "Unknown";
+        case "tahsil":
+          return c.tahsil || "";
+        case "wasa_category":
+          return (c.wasaCategory as string) || "others";
+        case "routing":
+          return c.routingStrategy || "";
         case "employee":
-          return c.assignedToName || "Unassigned";
+          return c.assignedTo || "";
         default:
-          return "Unknown";
+          return "";
       }
     };
 
     const labelFor = (k: string): string => {
-      if (groupBy === "complaint_type") {
-        return typeLabelLookup[k] ?? k;
+      switch (groupBy) {
+        case "tahsil":
+          return k || "—";
+        case "wasa_category":
+          return wasaCategoryLabel(k);
+        case "routing":
+          return k ? ROUTING_LABEL[k as RoutingStrategy] ?? k : "—";
+        case "employee":
+          return k ? employeeNameByUid[k] ?? k : "Unassigned";
+        default:
+          return k || "—";
       }
-      return k;
     };
 
-    const buckets = new Map<
-      string,
-      {
-        total: number;
-        pending: number;
-        assigned: number;
-        in_progress: number;
-        resolved: number;
-        rejected: number;
-        reopened: number;
-        hoursSum: number;
-        hoursCount: number;
-      }
-    >();
-
+    const map = new Map<string, Bucket>();
     for (const c of complaints) {
-      const k = keyFor(c);
-      let b = buckets.get(k);
+      const key = keyFor(c);
+      let b = map.get(key);
       if (!b) {
         b = {
+          key,
+          label: labelFor(key),
           total: 0,
-          pending: 0,
-          assigned: 0,
-          in_progress: 0,
-          resolved: 0,
-          rejected: 0,
-          reopened: 0,
-          hoursSum: 0,
-          hoursCount: 0,
+          action_required: 0,
+          action_taken: 0,
+          irrelevant: 0,
+          resolutionHoursSum: 0,
+          resolvedCount: 0,
         };
-        buckets.set(k, b);
+        map.set(key, b);
       }
       b.total += 1;
-      switch (c.status) {
-        case "pending":
-          b.pending += 1;
-          break;
-        case "assigned":
-          b.assigned += 1;
-          break;
-        case "in_progress":
-          b.in_progress += 1;
-          break;
-        case "resolved":
-          b.resolved += 1;
-          break;
-        case "rejected":
-          b.rejected += 1;
-          break;
-        case "reopened":
-          b.reopened += 1;
-          break;
-      }
-      if (c.status === "resolved" && c.resolvedAt) {
-        const created = tsToDate(c.createdAt);
-        const resolved = tsToDate(c.resolvedAt);
-        if (created && resolved) {
-          b.hoursSum += differenceInHours(resolved, created);
-          b.hoursCount += 1;
+      b[c.complaintStatus] += 1;
+      if (c.complaintStatus === "action_taken") {
+        const h = hoursBetween(c.createdAt, c.actionTakenAt);
+        if (h !== null) {
+          b.resolutionHoursSum += h;
+          b.resolvedCount += 1;
         }
       }
     }
 
-    return Array.from(buckets.entries())
-      .map(([k, b]) => ({
-        key: k,
-        label: labelFor(k),
+    return Array.from(map.values())
+      .map((b) => ({
+        key: b.key,
+        label: b.label,
         total: b.total,
-        pending: b.pending,
-        assigned: b.assigned,
-        in_progress: b.in_progress,
-        resolved: b.resolved,
-        rejected: b.rejected,
+        action_required: b.action_required,
+        action_taken: b.action_taken,
+        irrelevant: b.irrelevant,
         avgResolutionHours:
-          b.hoursCount > 0 ? b.hoursSum / b.hoursCount : null,
+          b.resolvedCount > 0 ? b.resolutionHoursSum / b.resolvedCount : null,
       }))
       .sort((a, b) => b.total - a.total);
-  }, [complaints, groupBy, typeLabelLookup]);
+  }, [complaints, groupBy, employeeNameByUid]);
 
   /* ---- Export helpers ---- */
   const groupByLabel = GROUP_BY_COLUMN_LABEL[groupBy];
@@ -275,31 +279,26 @@ export default function ReportsPage() {
     const columns = [
       { header: groupByLabel, dataKey: "label", width: 28 },
       { header: "Total", dataKey: "total", width: 10 },
-      { header: "Pending", dataKey: "pending", width: 12 },
-      { header: "Assigned", dataKey: "assigned", width: 12 },
-      { header: "In Progress", dataKey: "in_progress", width: 14 },
-      { header: "Resolved", dataKey: "resolved", width: 12 },
-      { header: "Rejected", dataKey: "rejected", width: 12 },
+      { header: "Action Required", dataKey: "action_required", width: 16 },
+      { header: "Resolved", dataKey: "action_taken", width: 12 },
+      { header: "Rejected", dataKey: "irrelevant", width: 12 },
       { header: "Avg Resolution", dataKey: "avgResolution", width: 16 },
     ];
 
     const mappedRows: Record<string, string | number>[] = rows.map((r) => ({
       label: r.label,
       total: r.total,
-      pending: r.pending,
-      assigned: r.assigned,
-      in_progress: r.in_progress,
-      resolved: r.resolved,
-      rejected: r.rejected,
+      action_required: r.action_required,
+      action_taken: r.action_taken,
+      irrelevant: r.irrelevant,
       avgResolution: formatHoursForExport(r.avgResolutionHours),
     }));
 
     const summary = [
       { label: "Total", value: statsCounts.total },
-      { label: "Pending", value: statsCounts.pending },
-      { label: "In Progress", value: statsCounts.in_progress },
-      { label: "Resolved", value: statsCounts.resolved },
-      { label: "Rejected", value: statsCounts.rejected },
+      { label: "Action Required", value: statsCounts.action_required },
+      { label: "Resolved", value: statsCounts.action_taken },
+      { label: "Rejected", value: statsCounts.irrelevant },
     ];
 
     return { columns, mappedRows, summary };
@@ -361,18 +360,18 @@ export default function ReportsPage() {
 
   const tehsilOptions = useMemo(
     () => [
-      { value: "", label: "All tehsils" },
+      { value: "", label: "All tahsils" },
       ...filters.availableTehsils.map((t) => ({ value: t, label: t })),
     ],
     [filters.availableTehsils],
   );
 
-  const complaintTypeOptions = useMemo(
+  const wasaCategoryOptions = useMemo(
     () => [
-      { value: "", label: "All types" },
-      ...types.map((t) => ({ value: t.key, label: t.label })),
+      { value: "", label: "All categories" },
+      ...WASA_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
     ],
-    [types],
+    [],
   );
 
   return (
@@ -382,15 +381,15 @@ export default function ReportsPage() {
           Reports
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Aggregated complaint statistics across your scope. Group by tehsil,
-          UC, complaint type, or employee.
+          Aggregated complaint statistics across your scope. Group by tahsil,
+          category, routing, or employee.
         </p>
       </div>
 
       {/* Filter bar */}
       <Card>
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
                 District
@@ -404,7 +403,7 @@ export default function ReportsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Tehsil
+                Tahsil
               </label>
               <Dropdown
                 value={filters.selectedTehsil}
@@ -415,12 +414,26 @@ export default function ReportsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Complaint type
+                Category
               </label>
               <Dropdown
-                value={filters.selectedComplaintType}
-                onChange={filters.setSelectedComplaintType}
-                options={complaintTypeOptions}
+                value={filters.selectedWasaCategory}
+                onChange={(v) =>
+                  filters.setSelectedWasaCategory(v as WasaCategoryValue | "")
+                }
+                options={wasaCategoryOptions}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                Routing
+              </label>
+              <Dropdown
+                value={filters.selectedRouting}
+                onChange={(v) =>
+                  filters.setSelectedRouting(v as "" | RoutingStrategy)
+                }
+                options={ROUTING_OPTIONS}
               />
             </div>
             <div>
@@ -500,7 +513,7 @@ export default function ReportsPage() {
           >
             <span>{chip.label}</span>
             <span className="tabular-nums font-semibold">
-              {statsCounts[chip.key as ComplaintStatus | "total"] ?? 0}
+              {statsCounts[chip.key] ?? 0}
             </span>
           </span>
         ))}

@@ -13,7 +13,11 @@ import {
   STATUS_BADGE,
   STATUS_LABELS,
 } from "@/constants/statuses";
-import { COMPLAINT_TYPE_FALLBACK } from "@/constants/complaintTypes";
+import {
+  wasaCategoryColor,
+  wasaCategoryLabel,
+} from "@/constants/wasaCategories";
+import { derivePriority } from "@/lib/derivePriority";
 import { formatTimeAgo } from "@/lib/formatters";
 import type { Complaint } from "@/types";
 
@@ -45,25 +49,27 @@ function buildDivIcon(color: string, letter: string): L.DivIcon {
 }
 
 function ComplaintMarkerImpl({ complaint, onView }: ComplaintMarkerProps) {
-  const typeMeta =
-    COMPLAINT_TYPE_FALLBACK[complaint.complaintType] ?? {
-      label: complaint.complaintType || "Complaint",
-      color: "#64748b",
-      icon: "MapPin",
-    };
-
-  const letter = (typeMeta.label || "?").trim().charAt(0).toUpperCase() || "?";
+  const categoryColor = wasaCategoryColor(complaint.wasaCategory);
+  const categoryLabel = wasaCategoryLabel(complaint.wasaCategory);
+  const letter =
+    (categoryLabel || "?").trim().charAt(0).toUpperCase() || "?";
 
   const icon = useMemo(
-    () => buildDivIcon(typeMeta.color, letter),
-    [typeMeta.color, letter]
+    () => buildDivIcon(categoryColor, letter),
+    [categoryColor, letter]
   );
 
-  const lat = complaint.coordinates?.lat;
-  const lng = complaint.coordinates?.lng;
+  const lat = complaint.complainCoordinates?.lat;
+  const lng = complaint.complainCoordinates?.lng;
   if (typeof lat !== "number" || typeof lng !== "number") return null;
 
-  const locationLine = [complaint.district, complaint.tehsil, complaint.ucName]
+  const derivedPriority = derivePriority(complaint.wasaCategory);
+
+  const locationLine = [
+    complaint.district,
+    complaint.tahsil,
+    complaint.ucMcNumber || "—",
+  ]
     .filter(Boolean)
     .join(" / ");
 
@@ -75,32 +81,32 @@ function ComplaintMarkerImpl({ complaint, onView }: ComplaintMarkerProps) {
             <span
               className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium"
               style={{
-                backgroundColor: `${typeMeta.color}20`,
-                color: typeMeta.color,
+                backgroundColor: `${categoryColor}20`,
+                color: categoryColor,
               }}
             >
               <span
                 className="inline-block h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: typeMeta.color }}
+                style={{ backgroundColor: categoryColor }}
                 aria-hidden
               />
-              {typeMeta.label}
+              {categoryLabel}
             </span>
             <span
               className={cn(
                 "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium uppercase",
-                STATUS_BADGE[complaint.status]
+                STATUS_BADGE[complaint.complaintStatus]
               )}
             >
-              {STATUS_LABELS[complaint.status]}
+              {STATUS_LABELS[complaint.complaintStatus]}
             </span>
             <span
               className={cn(
                 "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium uppercase",
-                PRIORITY_BADGE[complaint.priority]
+                PRIORITY_BADGE[derivedPriority]
               )}
             >
-              {PRIORITY_LABELS[complaint.priority]}
+              {PRIORITY_LABELS[derivedPriority]}
             </span>
           </div>
 

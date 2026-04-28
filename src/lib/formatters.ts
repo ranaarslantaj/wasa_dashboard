@@ -45,13 +45,20 @@ export const formatTimeAgo = (d: DateInput): string => {
   }
 };
 
-export const formatResolutionTime = (createdAt: DateInput, resolvedAt: DateInput): string => {
+export const formatResolutionTime = (createdAt: DateInput, actionTakenAt: DateInput): string => {
   const c = toDate(createdAt);
-  const r = toDate(resolvedAt);
+  const r = toDate(actionTakenAt);
   if (!c || !r) return '-';
   const mins = differenceInMinutes(r, c);
   if (mins < 60) return `${mins}m`;
   const hrs = differenceInHours(r, c);
   if (hrs < 48) return `${hrs}h`;
   return `${Math.round(hrs / 24)}d`;
+};
+
+export const hoursBetween = (a: DateInput, b: DateInput): number | null => {
+  const da = toDate(a);
+  const db = toDate(b);
+  if (!da || !db) return null;
+  return Math.max(0, (db.getTime() - da.getTime()) / 3_600_000);
 };

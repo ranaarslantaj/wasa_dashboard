@@ -19,11 +19,9 @@ export interface ReportRow {
   key: string;
   label: string;
   total: number;
-  pending: number;
-  assigned: number;
-  in_progress: number;
-  resolved: number;
-  rejected: number;
+  action_required: number;
+  action_taken: number;
+  irrelevant: number;
   avgResolutionHours: number | null;
 }
 
@@ -44,25 +42,21 @@ export function ReportTable({ rows, loading, groupByLabel }: ReportTableProps) {
   const totals = useMemo(() => {
     const out = {
       total: 0,
-      pending: 0,
-      assigned: 0,
-      in_progress: 0,
-      resolved: 0,
-      rejected: 0,
+      action_required: 0,
+      action_taken: 0,
+      irrelevant: 0,
       hoursSum: 0,
       hoursCount: 0,
     };
     for (const r of rows) {
       out.total += r.total;
-      out.pending += r.pending;
-      out.assigned += r.assigned;
-      out.in_progress += r.in_progress;
-      out.resolved += r.resolved;
-      out.rejected += r.rejected;
+      out.action_required += r.action_required;
+      out.action_taken += r.action_taken;
+      out.irrelevant += r.irrelevant;
       if (r.avgResolutionHours !== null) {
         // weight by resolved count for a proper aggregate
-        out.hoursSum += r.avgResolutionHours * r.resolved;
-        out.hoursCount += r.resolved;
+        out.hoursSum += r.avgResolutionHours * r.action_taken;
+        out.hoursCount += r.action_taken;
       }
     }
     return out;
@@ -100,9 +94,7 @@ export function ReportTable({ rows, loading, groupByLabel }: ReportTableProps) {
           <TR>
             <TH>{groupByLabel}</TH>
             <TH className={cn(numCell, "text-right")}>Total</TH>
-            <TH className={cn(numCell, "text-right")}>Pending</TH>
-            <TH className={cn(numCell, "text-right")}>Assigned</TH>
-            <TH className={cn(numCell, "text-right")}>In Progress</TH>
+            <TH className={cn(numCell, "text-right")}>Action Required</TH>
             <TH className={cn(numCell, "text-right")}>Resolved</TH>
             <TH className={cn(numCell, "text-right")}>Rejected</TH>
             <TH className={cn(numCell, "text-right")}>Avg Resolution</TH>
@@ -115,22 +107,18 @@ export function ReportTable({ rows, loading, groupByLabel }: ReportTableProps) {
                 {r.label}
               </TD>
               <TD className={numCell}>{r.total}</TD>
-              <TD className={numCell}>{r.pending}</TD>
-              <TD className={numCell}>{r.assigned}</TD>
-              <TD className={numCell}>{r.in_progress}</TD>
-              <TD className={numCell}>{r.resolved}</TD>
-              <TD className={numCell}>{r.rejected}</TD>
+              <TD className={numCell}>{r.action_required}</TD>
+              <TD className={numCell}>{r.action_taken}</TD>
+              <TD className={numCell}>{r.irrelevant}</TD>
               <TD className={numCell}>{formatHours(r.avgResolutionHours)}</TD>
             </TR>
           ))}
           <TR className="bg-slate-50 font-semibold hover:bg-slate-50 dark:bg-slate-900/80 dark:hover:bg-slate-900/80">
             <TD className="text-slate-900 dark:text-slate-100">Total</TD>
             <TD className={numCell}>{totals.total}</TD>
-            <TD className={numCell}>{totals.pending}</TD>
-            <TD className={numCell}>{totals.assigned}</TD>
-            <TD className={numCell}>{totals.in_progress}</TD>
-            <TD className={numCell}>{totals.resolved}</TD>
-            <TD className={numCell}>{totals.rejected}</TD>
+            <TD className={numCell}>{totals.action_required}</TD>
+            <TD className={numCell}>{totals.action_taken}</TD>
+            <TD className={numCell}>{totals.irrelevant}</TD>
             <TD className={numCell}>{formatHours(avgTotal)}</TD>
           </TR>
         </TBody>
