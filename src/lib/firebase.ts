@@ -24,7 +24,15 @@ export const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-export const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const isServer = typeof window === 'undefined';
+const buildTimeConfig = {
+  ...firebaseConfig,
+  apiKey: firebaseConfig.apiKey || (isServer ? "mock-api-key" : undefined),
+  projectId: firebaseConfig.projectId || (isServer ? "mock-project-id" : undefined),
+  appId: firebaseConfig.appId || (isServer ? "mock-app-id" : undefined),
+};
+
+export const app: FirebaseApp = getApps().length ? getApp() : initializeApp(buildTimeConfig);
 export const auth: Auth = getAuth(app);
 export const db: Firestore = getFirestore(app);
 export const storage: FirebaseStorage = getStorage(app);
