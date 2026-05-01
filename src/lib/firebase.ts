@@ -38,12 +38,12 @@ export const db: Firestore = getFirestore(app);
 export const storage: FirebaseStorage = getStorage(app);
 
 /**
- * Create a Firebase Auth user without disturbing the admin's primary session.
+ * Create a Firebase Auth user without disturbing the current session.
  *
  * Spins up a short-lived secondary Firebase app, calls `createUserWithEmailAndPassword`
  * on its isolated Auth instance, signs that instance out, and tears the app down.
  * Returns the new user's `uid` so callers can persist it on the corresponding
- * Firestore profile document.
+ * Firestore profile document. Used for both employee and admin provisioning.
  */
 export const createAuthUserForEmployee = async (
   email: string,
@@ -70,6 +70,9 @@ export const createAuthUserForEmployee = async (
     }
   }
 };
+
+/** Generic alias of {@link createAuthUserForEmployee}. Same secondary-app flow. */
+export const createAuthUser = createAuthUserForEmployee;
 
 /**
  * Normalize Firestore Timestamps, plain Date, or nullish values into a Date (or null).

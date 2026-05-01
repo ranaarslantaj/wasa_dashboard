@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
-import L from "leaflet";
+import type { Map as LeafletMap } from "leaflet";
+import L, { type LatLngTuple } from "leaflet";
 import { subDays } from "date-fns";
 
+import { useAuth } from "@/context/AuthContext";
 import { useActiveFilters } from "@/context/FilterContext";
 import { useComplaints, type ComplaintsFilters } from "@/hooks/useComplaints";
 import { WASA_CATEGORIES } from "@/constants/wasaCategories";
 import { STATUS_BADGE, STATUS_LABELS } from "@/constants/statuses";
+import {
+  DEFAULT_MAP_CONFIG,
+  DISTRICT_MAP_CONFIG,
+  DIVISION_MAP_CONFIG,
+} from "@/constants/boundaries";
 import { derivePriority } from "@/lib/derivePriority";
 import { cn } from "@/lib/cn";
 import type { Complaint, ComplaintStatus, ComplaintPriority } from "@/types";
@@ -16,6 +23,7 @@ import type { Complaint, ComplaintStatus, ComplaintPriority } from "@/types";
 import { ComplaintDetailModal } from "@/components/complaints/ComplaintDetailModal";
 import { ComplaintMarker } from "./ComplaintMarker";
 import { HeatLayer } from "./HeatLayer";
+import { ZoomAwareBoundaries } from "./ZoomAwareBoundaries";
 import {
   MapLayerToggle,
   type MapLayerDescriptor,
@@ -42,6 +50,7 @@ interface EnabledState {
   action_taken: boolean;
   irrelevant: boolean;
   heatmap: boolean;
+  boundaries: boolean;
 }
 
 const STATUS_LAYER_COLORS: Record<StatusLayerKey, string> = {
@@ -57,24 +66,55 @@ const PRIORITY_INTENSITY: Record<ComplaintPriority, number> = {
   critical: 1.0,
 };
 
-const DEFAULT_CENTER: [number, number] = [31.1704, 72.7097];
-const DEFAULT_ZOOM = 7;
-
 export function LiveMapClient() {
   useEffect(() => {
     patchLeafletIcons();
   }, []);
 
+  const { adminScope } = useAuth();
   const f = useActiveFilters();
-  const defaultFrom = useMemo(() => subDays(new Date(), 7), []);
+  // Falls back to "last 90 days" only when the user picked nothing AND we
+  // didn't explicitly disable. Set to `null` to truly skip the date filter.
+  const defaultFrom = useMemo(() => subDays(new Date(), 90), []);
+
+  /**
+   * Initial map view derived from the admin's scope so each admin lands on
+   * their own region instead of always seeing all of Punjab.
+   */
+  const initialMapView = useMemo<{ center: LatLngTuple; zoom: number }>(() => {
+    if (!adminScope || adminScope.fullAccess) return DEFAULT_MAP_CONFIG;
+    if (
+      (adminScope.accessLevel === "tehsil" ||
+        adminScope.accessLevel === "district") &&
+      adminScope.district &&
+      DISTRICT_MAP_CONFIG[adminScope.district]
+    ) {
+      return DISTRICT_MAP_CONFIG[adminScope.district];
+    }
+    if (adminScope.accessLevel === "division") return DIVISION_MAP_CONFIG;
+    return DEFAULT_MAP_CONFIG;
+  }, [adminScope]);
 
   const [enabled, setEnabled] = useState<EnabledState>({
     all: true,
     action_required: true,
-    action_taken: false,
-    irrelevant: false,
+    action_taken: true,
+    irrelevant: true,
     heatmap: false,
+    boundaries: true,
   });
+
+  // Leaflet measures the container size when it initializes. If our wrapper
+  // hasn't laid out by then (Tailwind classes applied late, dynamic import
+  // hydration, etc.) the map renders blank. Force an invalidateSize() after
+  // mount so tiles paint correctly.
+  const mapRef = useRef<LeafletMap | null>(null);
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    const id = window.setTimeout(() => m.invalidateSize(), 50);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -90,6 +130,9 @@ export function LiveMapClient() {
   };
   const toggleHeatmap = (): void => {
     setEnabled((prev) => ({ ...prev, heatmap: !prev.heatmap }));
+  };
+  const toggleBoundaries = (): void => {
+    setEnabled((prev) => ({ ...prev, boundaries: !prev.boundaries }));
   };
 
   const baseFilters = useMemo(
@@ -155,25 +198,48 @@ export function LiveMapClient() {
     refetchIrrelevant();
   };
 
+  // Read coordinates tolerantly — newer citizen-app docs use `complainCoordinates`,
+  // older or hand-seeded docs may use `coordinates` or top-level `lat/lng`.
+  const readCoords = (
+    c: Complaint,
+  ): { lat: number; lng: number } | null => {
+    const candidates = [
+      c.complainCoordinates,
+      (c as Complaint & { coordinates?: { lat?: number; lng?: number } }).coordinates,
+      (c as Complaint & { actionCoordinates?: { lat?: number | null; lng?: number | null } })
+        .actionCoordinates,
+    ];
+    for (const co of candidates) {
+      const lat = co?.lat;
+      const lng = co?.lng;
+      if (typeof lat === "number" && typeof lng === "number" && !isNaN(lat) && !isNaN(lng)) {
+        return { lat, lng };
+      }
+    }
+    return null;
+  };
+
   const allMarkers = useMemo<Complaint[]>(() => {
     const byId = new Map<string, Complaint>();
     for (const c of [...actionRequired, ...actionTaken, ...irrelevant]) {
       byId.set(c.id, c);
     }
-    return Array.from(byId.values()).filter(
-      (c) =>
-        typeof c.complainCoordinates?.lat === "number" &&
-        typeof c.complainCoordinates?.lng === "number"
-    );
+    return Array.from(byId.values()).filter((c) => readCoords(c) !== null);
   }, [actionRequired, actionTaken, irrelevant]);
 
   const heatPoints = useMemo<[number, number, number][]>(
     () =>
-      allMarkers.map((c) => [
-        c.complainCoordinates.lat,
-        c.complainCoordinates.lng,
-        PRIORITY_INTENSITY[derivePriority(c.wasaCategory)] ?? 0.3,
-      ]),
+      allMarkers
+        .map<[number, number, number] | null>((c) => {
+          const co = readCoords(c);
+          if (!co) return null;
+          return [
+            co.lat,
+            co.lng,
+            PRIORITY_INTENSITY[derivePriority(c.wasaCategory)] ?? 0.3,
+          ];
+        })
+        .filter((p): p is [number, number, number] => p !== null),
     [allMarkers]
   );
 
@@ -210,16 +276,35 @@ export function LiveMapClient() {
 
   return (
     <div className="space-y-3">
-      <div className="relative">
+      <MapLayerToggle
+        layers={layers}
+        onToggle={toggleLayer}
+        heatmapEnabled={enabled.heatmap}
+        onHeatmapToggle={toggleHeatmap}
+        boundariesEnabled={enabled.boundaries}
+        onBoundariesToggle={toggleBoundaries}
+      />
+      <div
+        className="relative w-full overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"
+        style={{ height: "calc(100vh - 200px)", minHeight: 480 }}
+      >
         <MapContainer
-          center={DEFAULT_CENTER}
-          zoom={DEFAULT_ZOOM}
+          center={initialMapView.center}
+          zoom={initialMapView.zoom}
           scrollWheelZoom
-          className="h-[calc(100vh-140px)] w-full overflow-hidden rounded-xl"
+          ref={(instance) => {
+            mapRef.current = instance ?? null;
+          }}
+          style={{ height: "100%", width: "100%" }}
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          <ZoomAwareBoundaries
+            showBoundary={enabled.boundaries}
+            adminScope={adminScope}
           />
 
           {allMarkers.map((c) => (
@@ -234,13 +319,6 @@ export function LiveMapClient() {
             <HeatLayer points={heatPoints} />
           )}
         </MapContainer>
-
-        <MapLayerToggle
-          layers={layers}
-          onToggle={toggleLayer}
-          heatmapEnabled={enabled.heatmap}
-          onHeatmapToggle={toggleHeatmap}
-        />
 
         <div className="absolute bottom-4 left-4 z-[1000] max-w-[15rem] rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

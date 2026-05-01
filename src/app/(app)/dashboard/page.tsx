@@ -51,6 +51,7 @@ import {
   TopEmployeesChart,
 } from "@/components/dashboard/charts";
 import { RecentActivityList } from "@/components/dashboard/RecentActivityList";
+import { PageFilterBar } from "@/components/filters/PageFilterBar";
 
 type Window = "7d" | "30d" | "90d" | "all";
 
@@ -376,6 +377,9 @@ export default function DashboardPage() {
           })}
         </div>
       </div>
+
+      {/* Shared filters */}
+      <PageFilterBar />
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">

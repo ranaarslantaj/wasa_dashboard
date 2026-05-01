@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
 
-import { useFilters, useActiveFilters } from "@/context/FilterContext";
+import { useActiveFilters } from "@/context/FilterContext";
 import { useWasaEmployees } from "@/hooks/useWasaEmployees";
 import { useComplaints } from "@/hooks/useComplaints";
 
@@ -53,6 +53,7 @@ import type {
 } from "@/types";
 
 import { WorkloadChart } from "@/components/assignments/WorkloadChart";
+import { PageFilterBar } from "@/components/filters/PageFilterBar";
 
 type TabId = "by_employee" | "by_date" | "by_status";
 
@@ -77,7 +78,6 @@ const DATE_RANGE_OPTIONS = [
 
 export default function AssignmentsPage() {
   const f = useActiveFilters();
-  const filters = useFilters();
   const [tab, setTab] = useState<TabId>("by_employee");
   const [expandedEmp, setExpandedEmp] = useState<Record<string, boolean>>({});
   const [dateRange, setDateRange] = useState<string>("");
@@ -183,22 +183,6 @@ export default function AssignmentsPage() {
     setExpandedEmp((s) => ({ ...s, [id]: !s[id] }));
   };
 
-  const districtOptions = useMemo(
-    () => [
-      { value: "", label: "All districts" },
-      ...filters.availableDistricts.map((d) => ({ value: d, label: d })),
-    ],
-    [filters.availableDistricts],
-  );
-
-  const tehsilOptions = useMemo(
-    () => [
-      { value: "", label: "All tehsils" },
-      ...filters.availableTehsils.map((t) => ({ value: t, label: t })),
-    ],
-    [filters.availableTehsils],
-  );
-
   return (
     <div className="space-y-6">
       <div>
@@ -210,32 +194,13 @@ export default function AssignmentsPage() {
         </p>
       </div>
 
-      {/* Filter bar */}
+      {/* Shared filters */}
+      <PageFilterBar />
+
+      {/* Date-range scoped to the assignments view */}
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                District
-              </label>
-              <Dropdown
-                value={filters.selectedDistrict}
-                onChange={filters.setSelectedDistrict}
-                options={districtOptions}
-                locked={filters.districtLocked}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Tehsil
-              </label>
-              <Dropdown
-                value={filters.selectedTehsil}
-                onChange={filters.setSelectedTehsil}
-                options={tehsilOptions}
-                locked={filters.tehsilLocked}
-              />
-            </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
                 Date range (assigned)

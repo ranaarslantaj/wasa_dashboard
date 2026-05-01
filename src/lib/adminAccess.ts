@@ -1,5 +1,5 @@
 export const ADMIN_MANAGEMENT_EMAILS: string[] = [
-  'dev@wasa.com',
+  'dev@team.com',
 ];
 
 export const hasAdminManagementAccess = (email: string | null | undefined): boolean => {

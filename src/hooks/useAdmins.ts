@@ -53,7 +53,7 @@ export function useAdmins(filters: AdminsFilters | null): UseAdminsResult {
       constraints.push(orderBy('createdAt', 'desc'));
       constraints.push(fsLimit(cap));
 
-      const q = query(collection(db, 'Admins'), ...constraints);
+      const q = query(collection(db, 'WasaAdmins'), ...constraints);
       const snap = await getDocs(q);
       let rows: Admin[] = snap.docs.map((d) => ({
         id: d.id,

@@ -199,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     listenerAdminIdRef.current = currentId;
 
     const unsub = onSnapshot(
-      doc(db, "Admins", currentId),
+      doc(db, "WasaAdmins", currentId),
       (snap) => {
         if (!snap.exists()) {
           toast.show({
@@ -284,7 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signInWithEmailAndPassword(auth, email, password);
 
         const adminsQuery = query(
-          collection(db, "Admins"),
+          collection(db, "WasaAdmins"),
           where("email", "==", normalizedEmail),
           limit(1)
         );
@@ -320,7 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-          await updateDoc(doc(db, "Admins", docSnap.id), {
+          await updateDoc(doc(db, "WasaAdmins", docSnap.id), {
             lastLogin: serverTimestamp(),
           });
         } catch {

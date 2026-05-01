@@ -73,9 +73,12 @@ export function useComplaints(filters: ComplaintsFilters | null): UseComplaintsR
     try {
       const constraints: QueryConstraint[] = [];
 
-      // Pin to manhole + wasa — non-negotiable for this dashboard.
+      // Pin to manhole — that's the discriminator for WASA complaints in the
+      // shared citizen-app collection. We deliberately do NOT also require
+      // `departmentType == 'wasa'` server-side because some legacy/test docs
+      // were written without that field; instead it's enforced client-side
+      // below as defense-in-depth (and only when present).
       constraints.push(where('complainType', '==', 'manhole'));
-      constraints.push(where('departmentType', '==', 'wasa'));
 
       // Server-side scope filter.
       let scopeFilteredServerSide = false;
@@ -115,6 +118,13 @@ export function useComplaints(filters: ComplaintsFilters | null): UseComplaintsR
         ...(d.data() as Omit<Complaint, 'id'>),
         id: d.id,
       })) as Complaint[];
+
+      // Defense-in-depth: drop docs explicitly tagged with a non-wasa department.
+      // Tolerates docs that omit the field (legacy / test data).
+      rows = rows.filter((c) => {
+        const dept = (c as Complaint & { departmentType?: string | null }).departmentType;
+        return dept === undefined || dept === null || dept === 'wasa';
+      });
 
       // Defense-in-depth scope re-filter.
       if (filters.scopeDistricts.length > 0) {

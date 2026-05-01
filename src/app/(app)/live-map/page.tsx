@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { PageLoader } from "@/components/ui/PageLoader";
+import { PageFilterBar } from "@/components/filters/PageFilterBar";
 
 // Leaflet touches `window` at import time — load the map client-only.
 const LiveMapClient = dynamic(
@@ -18,10 +19,10 @@ export default function LiveMapPage() {
       <header>
         <h1 className="text-2xl font-semibold">Live Map</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Geographic view of complaints with filters and heatmap. Defaults to
-          the last 7 days.
+          Geographic view of complaints with filters and heatmap.
         </p>
       </header>
+      <PageFilterBar />
       <LiveMapClient />
     </div>
   );

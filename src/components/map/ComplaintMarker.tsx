@@ -26,41 +26,75 @@ export interface ComplaintMarkerProps {
   onView: (c: Complaint) => void;
 }
 
-function buildDivIcon(color: string, letter: string): L.DivIcon {
+/**
+ * Compact Google-Maps-style teardrop pin (18×26) with a clean white
+ * circular hole at the head. Body color comes from the complaint's
+ * WASA sub-category. Anchor sits at the tip (bottom-center).
+ */
+function buildDivIcon(color: string): L.DivIcon {
+  const html = `
+    <div style="position:relative;width:18px;height:26px;filter:drop-shadow(0 1.5px 2px rgba(15,23,42,0.4));">
+      <svg viewBox="0 0 18 26" width="18" height="26" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M9 1
+             C 4.6 1 1 4.6 1 9
+             C 1 15.5 9 25 9 25
+             C 9 25 17 15.5 17 9
+             C 17 4.6 13.4 1 9 1 Z"
+          fill="${color}"
+        />
+        <circle cx="9" cy="9" r="3" fill="#ffffff" />
+      </svg>
+    </div>
+  `;
   return L.divIcon({
-    className: "wasa-complaint-marker",
-    html: `<div style="
-      width: 28px; height: 28px;
-      background: ${color};
-      border: 2px solid #fff;
-      border-radius: 9999px;
-      box-shadow: 0 2px 6px rgba(15,23,42,0.35);
-      display: flex; align-items: center; justify-content: center;
-      color: #fff;
-      font-weight: 600;
-      font-size: 12px;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      line-height: 1;
-    ">${letter}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14],
+    className: "wasa-complaint-pin",
+    html,
+    iconSize: [18, 26],
+    iconAnchor: [9, 25],
+    popupAnchor: [0, -22],
   });
 }
 
+const FALLBACK_COLOR = "#2563EB"; // brand-600 — always something WASA-coloured
+
 function ComplaintMarkerImpl({ complaint, onView }: ComplaintMarkerProps) {
-  const categoryColor = wasaCategoryColor(complaint.wasaCategory);
-  const categoryLabel = wasaCategoryLabel(complaint.wasaCategory);
-  const letter =
-    (categoryLabel || "?").trim().charAt(0).toUpperCase() || "?";
+  const rawColor = wasaCategoryColor(complaint.wasaCategory);
+  const categoryColor = complaint.wasaCategory ? rawColor : FALLBACK_COLOR;
+  const categoryLabel = complaint.wasaCategory
+    ? wasaCategoryLabel(complaint.wasaCategory)
+    : "WASA Complaint";
 
   const icon = useMemo(
-    () => buildDivIcon(categoryColor, letter),
-    [categoryColor, letter]
+    () => buildDivIcon(categoryColor),
+    [categoryColor],
   );
 
-  const lat = complaint.complainCoordinates?.lat;
-  const lng = complaint.complainCoordinates?.lng;
+  // Tolerate legacy field shapes — `complainCoordinates`, `coordinates`,
+  // or `actionCoordinates`.
+  const cAny = complaint as Complaint & {
+    coordinates?: { lat?: number; lng?: number };
+    actionCoordinates?: { lat?: number | null; lng?: number | null };
+  };
+  const candidates = [
+    complaint.complainCoordinates,
+    cAny.coordinates,
+    cAny.actionCoordinates,
+  ];
+  let lat: number | undefined;
+  let lng: number | undefined;
+  for (const co of candidates) {
+    if (
+      typeof co?.lat === "number" &&
+      typeof co?.lng === "number" &&
+      !isNaN(co.lat) &&
+      !isNaN(co.lng)
+    ) {
+      lat = co.lat;
+      lng = co.lng;
+      break;
+    }
+  }
   if (typeof lat !== "number" || typeof lng !== "number") return null;
 
   const derivedPriority = derivePriority(complaint.wasaCategory);

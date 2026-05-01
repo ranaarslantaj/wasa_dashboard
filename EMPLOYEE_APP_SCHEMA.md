@@ -29,7 +29,7 @@ Use **Firebase Auth (Email + Password)** for sign-in. Use **Cloud Firestore** fo
 | `UnionCouncils/*` | Optional (display UC/MC names) | No |
 | `AddressHierarchy/Punjab` | Optional (display geography) | No |
 
-**Do not** create or write to any other collection. Specifically: do not write to `Assignments`, `Counters`, `Public`, `Departments`, `News`, `Campaigns`, `Admins`.
+**Do not** create or write to any other collection. Specifically: do not write to `Assignments`, `Counters`, `Public`, `Departments`, `News`, `Campaigns`, `Admins`, `WasaAdmins`.
 
 ---
 
