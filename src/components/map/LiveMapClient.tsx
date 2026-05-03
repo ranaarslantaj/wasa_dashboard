@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
-import L, { type LatLngTuple } from "leaflet";
+import L, { type LatLngBoundsLiteral, type LatLngTuple } from "leaflet";
 import { subDays } from "date-fns";
 
 import { useAuth } from "@/context/AuthContext";
@@ -13,9 +13,12 @@ import { WASA_CATEGORIES } from "@/constants/wasaCategories";
 import { STATUS_BADGE, STATUS_LABELS } from "@/constants/statuses";
 import {
   DEFAULT_MAP_CONFIG,
+  DISTRICT_BOUNDARIES,
   DISTRICT_MAP_CONFIG,
   DIVISION_MAP_CONFIG,
+  TEHSIL_BOUNDARIES,
 } from "@/constants/boundaries";
+import { getDistrictsForDivision } from "@/constants/geography";
 import { derivePriority } from "@/lib/derivePriority";
 import { cn } from "@/lib/cn";
 import type { Complaint, ComplaintStatus, ComplaintPriority } from "@/types";
@@ -80,10 +83,66 @@ export function LiveMapClient() {
   /**
    * Initial map view derived from the admin's scope so each admin lands on
    * their own region instead of always seeing all of Punjab.
+   *
+   * Where a polygon is available we compute exact bounds and let MapContainer's
+   * `bounds` prop fit them with padding — that gives a "polygon fills the
+   * frame" look (e.g. Lodhran district admin sees the full district + its
+   * tehsils with a comfortable margin).
    */
-  const initialMapView = useMemo<{ center: LatLngTuple; zoom: number }>(() => {
-    if (!adminScope || adminScope.fullAccess) return DEFAULT_MAP_CONFIG;
+  const initialView = useMemo<{
+    center: LatLngTuple;
+    zoom: number;
+    bounds?: LatLngBoundsLiteral;
+    maxZoom?: number;
+  }>(() => {
+    const polygonsToUse: LatLngTuple[][] = [];
+
+    if (adminScope && !adminScope.fullAccess) {
+      if (adminScope.accessLevel === "tehsil" && adminScope.tehsil) {
+        const p = TEHSIL_BOUNDARIES[adminScope.tehsil];
+        if (p) polygonsToUse.push(p);
+      } else if (
+        (adminScope.accessLevel === "district" ||
+          adminScope.accessLevel === "tehsil") &&
+        adminScope.district
+      ) {
+        const p = DISTRICT_BOUNDARIES[adminScope.district];
+        if (p) polygonsToUse.push(p);
+      } else if (
+        adminScope.accessLevel === "division" &&
+        adminScope.division
+      ) {
+        for (const d of getDistrictsForDivision(adminScope.division)) {
+          const p = DISTRICT_BOUNDARIES[d];
+          if (p) polygonsToUse.push(p);
+        }
+      }
+    }
+
+    if (polygonsToUse.length > 0) {
+      const flat: LatLngTuple[] = polygonsToUse.flat();
+      const lats = flat.map((p) => p[0]);
+      const lngs = flat.map((p) => p[1]);
+      const sw: LatLngTuple = [Math.min(...lats), Math.min(...lngs)];
+      const ne: LatLngTuple = [Math.max(...lats), Math.max(...lngs)];
+      const center: LatLngTuple = [
+        (sw[0] + ne[0]) / 2,
+        (sw[1] + ne[1]) / 2,
+      ];
+      const isTehsil = adminScope?.accessLevel === "tehsil";
+      const isDivision = adminScope?.accessLevel === "division";
+      return {
+        center,
+        zoom: isTehsil ? 13 : isDivision ? 10 : 11,
+        bounds: [sw, ne],
+        maxZoom: isTehsil ? 14 : isDivision ? 10 : 12,
+      };
+    }
+
+    // No polygon available — fall back to the static configs.
     if (
+      adminScope &&
+      !adminScope.fullAccess &&
       (adminScope.accessLevel === "tehsil" ||
         adminScope.accessLevel === "district") &&
       adminScope.district &&
@@ -91,7 +150,7 @@ export function LiveMapClient() {
     ) {
       return DISTRICT_MAP_CONFIG[adminScope.district];
     }
-    if (adminScope.accessLevel === "division") return DIVISION_MAP_CONFIG;
+    if (adminScope?.accessLevel === "division") return DIVISION_MAP_CONFIG;
     return DEFAULT_MAP_CONFIG;
   }, [adminScope]);
 
@@ -104,6 +163,14 @@ export function LiveMapClient() {
     boundaries: true,
   });
 
+  /**
+   * Recenter / zoom the map whenever the user narrows the geographic filter.
+   * Tehsil → fit to that tehsil polygon; District → district polygon; Division
+   * → union of all that division's district polygons; cleared → admin's
+   * scope-based default. Falls back gracefully when no polygon is on file.
+   */
+  const focusBoundsKey = `${f.division}|${f.district}|${f.tehsil}`;
+
   // Leaflet measures the container size when it initializes. If our wrapper
   // hasn't laid out by then (Tailwind classes applied late, dynamic import
   // hydration, etc.) the map renders blank. Force an invalidateSize() after
@@ -115,6 +182,50 @@ export function LiveMapClient() {
     const id = window.setTimeout(() => m.invalidateSize(), 50);
     return () => window.clearTimeout(id);
   }, []);
+
+  // React to user-driven scope changes (filter dropdowns) — refit the view.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    const polygons: LatLngTuple[][] = [];
+
+    if (f.tehsil && TEHSIL_BOUNDARIES[f.tehsil]) {
+      polygons.push(TEHSIL_BOUNDARIES[f.tehsil]);
+    } else if (f.district && DISTRICT_BOUNDARIES[f.district]) {
+      polygons.push(DISTRICT_BOUNDARIES[f.district]);
+    } else if (f.division) {
+      const divDistricts = getDistrictsForDivision(f.division);
+      for (const d of divDistricts) {
+        if (DISTRICT_BOUNDARIES[d]) polygons.push(DISTRICT_BOUNDARIES[d]);
+      }
+    }
+
+    if (polygons.length > 0) {
+      const flat: LatLngTuple[] = polygons.flat();
+      const lats = flat.map((p) => p[0]);
+      const lngs = flat.map((p) => p[1]);
+      const sw: LatLngTuple = [Math.min(...lats), Math.min(...lngs)];
+      const ne: LatLngTuple = [Math.max(...lats), Math.max(...lngs)];
+      m.flyToBounds([sw, ne], {
+        padding: [30, 30],
+        duration: 0.6,
+        maxZoom: f.tehsil ? 14 : f.district ? 12 : 10,
+      });
+      return;
+    }
+
+    // No filter narrowing — fall back to the admin's initial view (no animation)
+    if (initialView.bounds) {
+      m.flyToBounds(initialView.bounds, {
+        padding: [30, 30],
+        duration: 0.5,
+        maxZoom: initialView.maxZoom ?? 12,
+      });
+    } else {
+      m.flyTo(initialView.center, initialView.zoom, { duration: 0.5 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusBoundsKey]);
 
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -289,8 +400,18 @@ export function LiveMapClient() {
         style={{ height: "calc(100vh - 200px)", minHeight: 480 }}
       >
         <MapContainer
-          center={initialMapView.center}
-          zoom={initialMapView.zoom}
+          {...(initialView.bounds
+            ? {
+                bounds: initialView.bounds,
+                boundsOptions: {
+                  padding: [30, 30],
+                  maxZoom: initialView.maxZoom ?? 12,
+                },
+              }
+            : {
+                center: initialView.center,
+                zoom: initialView.zoom,
+              })}
           scrollWheelZoom
           ref={(instance) => {
             mapRef.current = instance ?? null;

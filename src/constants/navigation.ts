@@ -6,8 +6,6 @@ import {
   UserCog,
   FileText,
   Tag,
-  Megaphone,
-  Newspaper,
   Shield,
 } from 'lucide-react';
 
@@ -26,7 +24,5 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: UserCog, label: 'Employees', path: '/employees' },
   { icon: FileText, label: 'Reports', path: '/reports' },
   { icon: Tag, label: 'Complaint Types', path: '/complaint-types', superAdminOnly: true },
-  { icon: Megaphone, label: 'Campaigns', path: '/campaigns', superAdminOnly: true },
-  { icon: Newspaper, label: 'News', path: '/news', superAdminOnly: true },
   { icon: Shield, label: 'Admin Management', path: '/admin-management', superAdminOnly: true },
 ];

@@ -340,52 +340,70 @@ export default function DashboardPage() {
   const loading = cLoading || eLoading;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-            Dashboard
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            {scopeLabel
-              ? `Overview for ${scopeLabel}`
-              : "Overview of WASA operations"}
-          </p>
-        </div>
+    <div className="space-y-4">
+      {/* Full-width filter bar */}
+      <PageFilterBar compact />
 
-        {/* Window toggle */}
-        <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
-          {WINDOW_OPTIONS.map((opt) => {
-            const active = windowKey === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setWindowKey(opt.value)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  active
-                    ? "bg-brand-600 text-white"
-                    : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
-                )}
-                aria-pressed={active}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
+      {/* Hero — scope summary + date window */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-brand-50 via-white to-emerald-50 p-4 dark:border-slate-800 dark:from-brand-900/30 dark:via-slate-900 dark:to-emerald-900/20 sm:p-5">
+        {/* Decorative blobs */}
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-brand-400/20 blur-3xl dark:bg-brand-500/20" />
+        <div className="pointer-events-none absolute -bottom-12 right-24 h-32 w-32 rounded-full bg-emerald-400/20 blur-3xl dark:bg-emerald-500/15" />
+
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300">
+              Dashboard overview
+            </div>
+            <h2 className="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100 sm:text-2xl">
+              Welcome back{adminScope?.fullAccess ? ", super-admin" : ""}.
+            </h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              {scopeLabel
+                ? `Viewing ${scopeLabel}`
+                : "WASA manhole complaints across your scope"}
+              {" · "}
+              <span className="text-slate-500 dark:text-slate-400">
+                {windowKey === "all"
+                  ? "All time"
+                  : windowKey === "7d"
+                    ? "Last 7 days"
+                    : windowKey === "30d"
+                      ? "Last 30 days"
+                      : "Last 90 days"}
+              </span>
+            </p>
+          </div>
+
+          <div className="inline-flex w-fit shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/70">
+            {WINDOW_OPTIONS.map((opt) => {
+              const active = windowKey === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setWindowKey(opt.value)}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                    active
+                      ? "bg-brand-600 text-white shadow"
+                      : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
+                  )}
+                  aria-pressed={active}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Shared filters */}
-      <PageFilterBar />
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      {/* Primary KPIs — bigger cards */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {cLoading ? (
-          Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="h-[98px] rounded-2xl" />
+          Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[110px] rounded-2xl" />
           ))
         ) : (
           <>
@@ -398,45 +416,69 @@ export default function DashboardPage() {
             <KpiCard
               label="Action Required"
               value={kpi.actionRequired}
+              subtext={
+                kpi.actionRequired > 0
+                  ? `${Math.round((kpi.actionRequired / Math.max(1, kpi.total)) * 100)}% of total`
+                  : undefined
+              }
               icon={Clock}
               accent="amber"
             />
             <KpiCard
               label="Resolved"
               value={kpi.actionTaken}
+              subtext={
+                kpi.actionTaken > 0
+                  ? `${Math.round((kpi.actionTaken / Math.max(1, kpi.total)) * 100)}% resolved`
+                  : undefined
+              }
               icon={CheckCircle2}
               accent="emerald"
             />
             <KpiCard
+              label="Pending Queue"
+              value={kpi.pendingQueue}
+              subtext="Unassigned · awaiting admin"
+              icon={Inbox}
+              accent="amber"
+            />
+          </>
+        )}
+      </div>
+
+      {/* Secondary KPIs — compact strip */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {cLoading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[60px] rounded-2xl" />
+          ))
+        ) : (
+          <>
+            <KpiCard
+              compact
               label="Rejected"
               value={kpi.irrelevant}
               icon={XCircle}
               accent="red"
             />
             <KpiCard
-              label="Pending Queue"
-              value={kpi.pendingQueue}
-              subtext="Unassigned dept queue"
-              icon={Inbox}
-              accent="amber"
-            />
-            <KpiCard
-              label="Overdue"
+              compact
+              label="Overdue (>72h)"
               value={kpi.overdue}
-              subtext=">72h pending"
               icon={AlertTriangle}
               accent="red"
             />
             <KpiCard
+              compact
               label="Avg Resolution"
               value={formatHours(kpi.avgResolutionHours)}
               icon={Timer}
               accent="slate"
             />
             <KpiCard
+              compact
               label="Active Employees"
-              value={activeEmployeesCount}
-              subtext={`${employees.length} total`}
+              value={`${activeEmployeesCount}/${employees.length || 0}`}
               icon={UserCheck}
               accent="brand"
             />
@@ -444,103 +486,95 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Charts row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Complaints over time</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[280px]" />
-            ) : overTimeData.length === 0 ? (
-              <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                No complaints in this window.
-              </p>
-            ) : (
-              <ComplaintsOverTimeChart data={overTimeData} />
-            )}
-          </CardContent>
-        </Card>
+      {/* Charts: trend (wide, 2/3) + status pie (narrow, 1/3) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <ChartCard
+          title="Complaints over time"
+          icon={ClipboardList}
+          accent="brand"
+          subtitle={overTimeData.length > 0 ? `${overTimeData.length} buckets` : undefined}
+          className="lg:col-span-2"
+        >
+          {loading ? (
+            <Skeleton className="h-[300px]" />
+          ) : overTimeData.length === 0 ? (
+            <EmptyChart label="No complaints in this window." />
+          ) : (
+            <ComplaintsOverTimeChart data={overTimeData} />
+          )}
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>By Category</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[280px]" />
-            ) : byCategoryData.length === 0 ? (
-              <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                No data.
-              </p>
-            ) : (
-              <ByTypeChart data={byCategoryData} />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          title="Status distribution"
+          icon={CheckCircle2}
+          accent="emerald"
+          subtitle={statusPieData.length > 0 ? `${statusPieData.length} statuses` : undefined}
+        >
+          {loading ? (
+            <Skeleton className="h-[300px]" />
+          ) : statusPieData.length === 0 ? (
+            <EmptyChart label="No data." />
+          ) : (
+            <StatusPieChart data={statusPieData} />
+          )}
+        </ChartCard>
       </div>
 
-      {/* Charts row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Status distribution</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[280px]" />
-            ) : statusPieData.length === 0 ? (
-              <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                No data.
-              </p>
-            ) : (
-              <StatusPieChart data={statusPieData} />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Complaints by tahsil (top 10)</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {loading ? (
-              <Skeleton className="h-[280px]" />
-            ) : byTahsilData.length === 0 ? (
-              <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                No data.
-              </p>
-            ) : (
-              <ByTehsilChart data={byTahsilData} />
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Charts row 3 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Top employees by resolved count</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
+      {/* By category + by tahsil */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="By category"
+          icon={Inbox}
+          accent="amber"
+          subtitle={byCategoryData.length > 0 ? `${byCategoryData.length} categories` : undefined}
+        >
           {loading ? (
             <Skeleton className="h-[280px]" />
-          ) : topEmployees.length === 0 ? (
-            <p className="flex h-[280px] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-              No employees in scope.
-            </p>
+          ) : byCategoryData.length === 0 ? (
+            <EmptyChart label="No data." />
           ) : (
-            <TopEmployeesChart data={topEmployees} />
+            <ByTypeChart data={byCategoryData} />
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+
+        <ChartCard
+          title="Top tahsils"
+          icon={ClipboardList}
+          accent="brand"
+          subtitle={byTahsilData.length > 0 ? `Top ${byTahsilData.length}` : undefined}
+        >
+          {loading ? (
+            <Skeleton className="h-[280px]" />
+          ) : byTahsilData.length === 0 ? (
+            <EmptyChart label="No data." />
+          ) : (
+            <ByTehsilChart data={byTahsilData} />
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Top employees */}
+      <ChartCard
+        title="Top employees by resolved count"
+        icon={UserCheck}
+        accent="emerald"
+        subtitle={topEmployees.length > 0 ? `Top ${topEmployees.length}` : undefined}
+      >
+        {loading ? (
+          <Skeleton className="h-[280px]" />
+        ) : topEmployees.length === 0 ? (
+          <EmptyChart label="No employees in scope." />
+        ) : (
+          <TopEmployeesChart data={topEmployees} />
+        )}
+      </ChartCard>
 
       {/* Recent activity */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <RecentActivityList
           title="Latest complaints"
           icon={ClipboardList}
+          accent="amber"
           emptyLabel="No recent complaints."
           items={latestComplaints.map((c) => ({
             id: c.id,
@@ -553,6 +587,7 @@ export default function DashboardPage() {
         <RecentActivityList
           title="Recently assigned"
           icon={UserCheck}
+          accent="brand"
           emptyLabel="No recent assignments."
           items={recentlyAssigned.map((c) => ({
             id: c.id,
@@ -567,6 +602,7 @@ export default function DashboardPage() {
         <RecentActivityList
           title="Recently resolved"
           icon={CheckCircle2}
+          accent="emerald"
           emptyLabel="No recent resolutions."
           items={recentlyResolved.map((c) => ({
             id: c.id,
@@ -579,6 +615,66 @@ export default function DashboardPage() {
           }))}
         />
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Local presentational helpers                                              */
+/* -------------------------------------------------------------------------- */
+
+const CHART_ACCENT_BG: Record<"brand" | "amber" | "emerald", string> = {
+  brand: "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
+  amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  emerald: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+};
+
+interface ChartCardProps {
+  title: string;
+  subtitle?: string;
+  icon: import("lucide-react").LucideIcon;
+  accent?: "brand" | "amber" | "emerald";
+  className?: string;
+  children: React.ReactNode;
+}
+
+function ChartCard({
+  title,
+  subtitle,
+  icon: Icon,
+  accent = "brand",
+  className,
+  children,
+}: ChartCardProps) {
+  return (
+    <Card className={cn("flex flex-col", className)}>
+      <CardHeader className="flex-row items-center gap-2 space-y-0 pb-2">
+        <span
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+            CHART_ACCENT_BG[accent],
+          )}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <CardTitle className="truncate text-sm">{title}</CardTitle>
+          {subtitle && (
+            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+              {subtitle}
+            </p>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 pt-0">{children}</CardContent>
+    </Card>
+  );
+}
+
+function EmptyChart({ label }: { label: string }) {
+  return (
+    <div className="flex h-[260px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+      {label}
     </div>
   );
 }

@@ -18,6 +18,14 @@ export interface ModalProps {
   closeOnOverlay?: boolean;
   closeOnEsc?: boolean;
   className?: string;
+  /** Override the body wrapper className (defaults to "px-5 pb-5"). Pass "" or "p-0" to render full-bleed children. */
+  bodyClassName?: string;
+  /**
+   * When true, the modal becomes a flex column with `overflow-hidden` on the
+   * card itself (so children — like a full-bleed hero — clip to the rounded
+   * corners), and the body wrapper becomes the lone scroll region.
+   */
+  scrollBody?: boolean;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -40,6 +48,8 @@ export function Modal({
   closeOnOverlay = true,
   closeOnEsc = true,
   className,
+  bodyClassName,
+  scrollBody,
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -69,7 +79,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[5000] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
     >
@@ -81,7 +91,9 @@ export function Modal({
       <div
         className={cn(
           "relative w-full rounded-2xl bg-white shadow-xl animate-slide-up dark:bg-slate-900",
-          "max-h-[90vh] overflow-y-auto",
+          scrollBody
+            ? "flex max-h-[90vh] flex-col overflow-hidden"
+            : "max-h-[90vh] overflow-y-auto",
           sizeClasses[size],
           className
         )}
@@ -108,7 +120,14 @@ export function Modal({
             )}
           </div>
         )}
-        <div className="px-5 pb-5">{children}</div>
+        <div
+          className={cn(
+            bodyClassName ?? "px-5 pb-5",
+            scrollBody && "flex-1 overflow-y-auto",
+          )}
+        >
+          {children}
+        </div>
         {footer && (
           <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3 dark:border-slate-800">
             {footer}

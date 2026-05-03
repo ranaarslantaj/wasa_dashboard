@@ -6,7 +6,7 @@ import {
   reauthenticateWithCredential,
 } from "firebase/auth";
 import { deleteDoc, doc, serverTimestamp, updateDoc } from "firebase/firestore";
-import { Plus, Search, Shield } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -223,19 +223,14 @@ function AdminManagementInner() {
 
   /* -------------------------------- Render -------------------------------- */
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
-            <Shield className="h-6 w-6 text-brand-600" /> Admin Management
-          </h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Create, edit, and deactivate dashboard admins. Each admin sees data
-            scoped to the geographic level you assign here.
-          </p>
-        </div>
-        <Button onClick={handleAdd} leftIcon={<Plus className="h-4 w-4" />}>
+    <div className="flex flex-col gap-3">
+      {/* Action button */}
+      <div className="flex items-center justify-end">
+        <Button
+          onClick={handleAdd}
+          size="sm"
+          leftIcon={<Plus className="h-4 w-4" />}
+        >
           New Admin
         </Button>
       </div>
@@ -250,84 +245,74 @@ function AdminManagementInner() {
         <StatChip label="Tehsil" value={stats.tehsil} accent="amber" />
       </div>
 
-      {/* Filters */}
+      {/* Filters (compact, single row) */}
       <Card>
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            <FilterField label="Access level">
-              <Dropdown
-                value={levelFilter}
-                onChange={(v) => setLevelFilter(v as LevelFilter)}
-                options={ACCESS_OPTIONS}
-              />
-            </FilterField>
-            <FilterField label="Status">
-              <Dropdown
-                value={statusFilter}
-                onChange={(v) => setStatusFilter(v as StatusFilter)}
-                options={STATUS_OPTIONS}
-              />
-            </FilterField>
-            <FilterField label="Province">
-              <Dropdown
-                value={provinceFilter}
-                onChange={(v) => {
-                  setProvinceFilter(v);
-                  setDivisionFilter("");
-                  setDistrictFilter("");
-                  setTehsilFilter("");
-                }}
-                options={[
-                  { value: "", label: "All provinces" },
-                  ...PROVINCES.map((p) => ({ value: p, label: p })),
-                ]}
-              />
-            </FilterField>
-            <FilterField label="Division">
-              <Dropdown
-                value={divisionFilter}
-                onChange={(v) => {
-                  setDivisionFilter(v);
-                  setDistrictFilter("");
-                  setTehsilFilter("");
-                }}
-                options={divisionOpts}
-              />
-            </FilterField>
-            <FilterField label="District">
-              <Dropdown
-                value={districtFilter}
-                onChange={(v) => {
-                  setDistrictFilter(v);
-                  setTehsilFilter("");
-                }}
-                options={districtOpts}
-                disabled={!divisionFilter}
-              />
-            </FilterField>
-            <FilterField label="Tehsil">
-              <Dropdown
-                value={tehsilFilter}
-                onChange={setTehsilFilter}
-                options={tehsilOpts}
-                disabled={!districtFilter}
-              />
-            </FilterField>
-            <FilterField label="Search">
-              <div className="relative">
-                <Search
-                  className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                  aria-hidden
-                />
-                <input
-                  type="text"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Name, email, phone"
-                  className="block w-full rounded-lg border-slate-300 bg-white pl-8 text-sm text-slate-900 focus:border-brand-500 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-              </div>
-            </FilterField>
+        <CardContent className="flex flex-wrap items-center gap-2 p-2.5">
+          <Dropdown
+            value={levelFilter}
+            onChange={(v) => setLevelFilter(v as LevelFilter)}
+            options={ACCESS_OPTIONS}
+            className="w-[160px]"
+          />
+          <Dropdown
+            value={statusFilter}
+            onChange={(v) => setStatusFilter(v as StatusFilter)}
+            options={STATUS_OPTIONS}
+            className="w-[140px]"
+          />
+          <Dropdown
+            value={provinceFilter}
+            onChange={(v) => {
+              setProvinceFilter(v);
+              setDivisionFilter("");
+              setDistrictFilter("");
+              setTehsilFilter("");
+            }}
+            options={[
+              { value: "", label: "All provinces" },
+              ...PROVINCES.map((p) => ({ value: p, label: p })),
+            ]}
+            className="w-[150px]"
+          />
+          <Dropdown
+            value={divisionFilter}
+            onChange={(v) => {
+              setDivisionFilter(v);
+              setDistrictFilter("");
+              setTehsilFilter("");
+            }}
+            options={divisionOpts}
+            className="w-[150px]"
+          />
+          <Dropdown
+            value={districtFilter}
+            onChange={(v) => {
+              setDistrictFilter(v);
+              setTehsilFilter("");
+            }}
+            options={districtOpts}
+            disabled={!divisionFilter}
+            className="w-[150px]"
+          />
+          <Dropdown
+            value={tehsilFilter}
+            onChange={setTehsilFilter}
+            options={tehsilOpts}
+            disabled={!districtFilter}
+            className="w-[150px]"
+          />
+          <div className="relative min-w-[180px] flex-1">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              aria-hidden
+            />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Name, email, phone"
+              className="block w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 text-sm text-slate-900 focus:border-brand-500 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
           </div>
         </CardContent>
       </Card>
@@ -406,19 +391,3 @@ function StatChip({
   );
 }
 
-function FilterField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}

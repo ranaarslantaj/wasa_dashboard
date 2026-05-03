@@ -184,36 +184,20 @@ export default function AssignmentsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          Assignments
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Track complaint assignments and workload across your scope.
-        </p>
+    <div className="space-y-3">
+      {/* Compact filter row + date range */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <div className="flex-1">
+          <PageFilterBar compact />
+        </div>
+        <div className="md:w-[180px]">
+          <Dropdown
+            value={dateRange}
+            onChange={setDateRange}
+            options={DATE_RANGE_OPTIONS}
+          />
+        </div>
       </div>
-
-      {/* Shared filters */}
-      <PageFilterBar />
-
-      {/* Date-range scoped to the assignments view */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Date range (assigned)
-              </label>
-              <Dropdown
-                value={dateRange}
-                onChange={setDateRange}
-                options={DATE_RANGE_OPTIONS}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       <Tabs
         tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}

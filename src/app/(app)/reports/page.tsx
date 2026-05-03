@@ -375,77 +375,47 @@ export default function ReportsPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          Reports
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Aggregated complaint statistics across your scope. Group by tahsil,
-          category, routing, or employee.
-        </p>
-      </div>
-
-      {/* Filter bar */}
+    <div className="space-y-3">
+      {/* Filter bar (compact, single-row) */}
       <Card>
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                District
-              </label>
-              <Dropdown
-                value={filters.selectedDistrict}
-                onChange={filters.setSelectedDistrict}
-                options={districtOptions}
-                locked={filters.districtLocked}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Tahsil
-              </label>
-              <Dropdown
-                value={filters.selectedTehsil}
-                onChange={filters.setSelectedTehsil}
-                options={tehsilOptions}
-                locked={filters.tehsilLocked}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Category
-              </label>
-              <Dropdown
-                value={filters.selectedWasaCategory}
-                onChange={(v) =>
-                  filters.setSelectedWasaCategory(v as WasaCategoryValue | "")
-                }
-                options={wasaCategoryOptions}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Routing
-              </label>
-              <Dropdown
-                value={filters.selectedRouting}
-                onChange={(v) =>
-                  filters.setSelectedRouting(v as "" | RoutingStrategy)
-                }
-                options={ROUTING_OPTIONS}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-                Date range
-              </label>
-              <Dropdown
-                value={dateRange}
-                onChange={setDateRange}
-                options={DATE_RANGE_OPTIONS}
-              />
-            </div>
+        <CardContent className="p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Dropdown
+              value={filters.selectedDistrict}
+              onChange={filters.setSelectedDistrict}
+              options={districtOptions}
+              locked={filters.districtLocked}
+              className="w-[150px]"
+            />
+            <Dropdown
+              value={filters.selectedTehsil}
+              onChange={filters.setSelectedTehsil}
+              options={tehsilOptions}
+              locked={filters.tehsilLocked}
+              className="w-[150px]"
+            />
+            <Dropdown
+              value={filters.selectedWasaCategory}
+              onChange={(v) =>
+                filters.setSelectedWasaCategory(v as WasaCategoryValue | "")
+              }
+              options={wasaCategoryOptions}
+              className="w-[170px]"
+            />
+            <Dropdown
+              value={filters.selectedRouting}
+              onChange={(v) =>
+                filters.setSelectedRouting(v as "" | RoutingStrategy)
+              }
+              options={ROUTING_OPTIONS}
+              className="w-[150px]"
+            />
+            <Dropdown
+              value={dateRange}
+              onChange={setDateRange}
+              options={DATE_RANGE_OPTIONS}
+              className="w-[150px]"
+            />
           </div>
         </CardContent>
       </Card>

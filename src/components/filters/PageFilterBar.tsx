@@ -23,6 +23,12 @@ export interface PageFilterBarProps {
     routing?: boolean;
     search?: boolean;
   };
+  /**
+   * Compact mode: drops the per-field labels, shrinks padding, and inlines the
+   * Reset button so the bar fits on a single row above space-tight pages
+   * (e.g. the Live Map).
+   */
+  compact?: boolean;
 }
 
 const ROUTING_OPTIONS = [
@@ -35,7 +41,7 @@ const ROUTING_OPTIONS = [
  * Scope-aware shared filter bar driven by FilterContext. Drop it on any page
  * that consumes `useActiveFilters()` and the changes propagate everywhere.
  */
-export function PageFilterBar({ className, show }: PageFilterBarProps) {
+export function PageFilterBar({ className, show, compact }: PageFilterBarProps) {
   const f = useFilters();
 
   const showDistrict = show?.district !== false;
@@ -87,6 +93,85 @@ export function PageFilterBar({ className, show }: PageFilterBarProps) {
     f.selectedAssignee ||
     f.dateRange.from ||
     f.dateRange.to;
+
+  if (compact) {
+    return (
+      <Card className={className}>
+        <CardContent className="flex flex-wrap items-center gap-2 p-2.5">
+          {showDistrict && (
+            <Dropdown
+              value={f.selectedDistrict}
+              onChange={f.setSelectedDistrict}
+              options={districtOptions}
+              locked={f.districtLocked}
+              className="w-[150px]"
+            />
+          )}
+          {showTehsil && (
+            <Dropdown
+              value={f.selectedTehsil}
+              onChange={f.setSelectedTehsil}
+              options={tehsilOptions}
+              locked={f.tehsilLocked}
+              className="w-[150px]"
+            />
+          )}
+          {showWasaCategory && (
+            <Dropdown
+              value={f.selectedWasaCategory}
+              onChange={f.setSelectedWasaCategory}
+              options={wasaOptions}
+              className="w-[170px]"
+            />
+          )}
+          {showStatus && (
+            <Dropdown
+              value={f.selectedStatus}
+              onChange={f.setSelectedStatus}
+              options={statusOptions}
+              className="w-[150px]"
+            />
+          )}
+          {showRouting && (
+            <Dropdown
+              value={f.selectedRouting}
+              onChange={(v) =>
+                f.setSelectedRouting(v as "" | "DEPT_DASHBOARD" | "UC_MC_AUTO")
+              }
+              options={ROUTING_OPTIONS}
+              className="w-[150px]"
+            />
+          )}
+          {showSearch && (
+            <div className="relative min-w-[180px] flex-1">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden
+              />
+              <input
+                type="text"
+                value={f.search}
+                onChange={(e) => f.setSearch(e.target.value)}
+                placeholder="Search"
+                className="block w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 text-sm text-slate-900 focus:border-brand-500 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+            </div>
+          )}
+          {hasActive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={f.resetFilters}
+              leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
+              className="ml-auto"
+            >
+              Reset
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className={className}>
