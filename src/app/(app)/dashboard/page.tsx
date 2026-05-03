@@ -341,9 +341,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      {/* Full-width filter bar */}
-      <PageFilterBar compact />
-
       {/* Hero — scope summary + date window */}
       <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-brand-50 via-white to-emerald-50 p-4 dark:border-slate-800 dark:from-brand-900/30 dark:via-slate-900 dark:to-emerald-900/20 sm:p-5">
         {/* Decorative blobs */}
@@ -398,6 +395,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Full-width filter bar */}
+      <PageFilterBar compact />
 
       {/* Primary KPIs — bigger cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
